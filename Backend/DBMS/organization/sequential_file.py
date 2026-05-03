@@ -93,11 +93,9 @@ class SequentialIndex:
         return sparse
     
     def search_rid(self, pk: int) -> Optional[Tuple[int, int]]:
-        """Busca el RID asociado a una PK.
-        Estrategia:
-        1. Búsqueda binaria en sparse_index para identificar página candidata.
-        2. Recorrido de la cadena lógica (next_pos) desde el primer entry de esa página.
-        """
+        #Busca el RID asociado a una PK:
+        #1. Búsqueda binaria en sparse_index para identificar página candidata.
+        #2. Recorrido de la cadena lógica (next_pos) desde el primer entry de esa página.
         if self.first_logical_pos == -1:
             return None
         
@@ -128,8 +126,8 @@ class SequentialIndex:
         return None
     
     def _sparse_start_pos(self, pk: int) -> int:
-        """Búsqueda binaria en sparse_index → posición del primer entry
-        de la última página con first_pk <= pk. O(log P)."""
+        #Búsqueda binaria en sparse_index → posición del primer entry
+        #de la última página con first_pk <= pk : O(log P)
         if not self.sparse_index:
             return self.first_logical_pos
         
@@ -369,7 +367,7 @@ class SequentialIndex:
         self.first_logical_pos = 4  # Byte 4 de página 1 (primer slot tras header)
         self._persist_metadata()
 
-    # ============ Métodos privados (helpers) ============
+    # Métodos privados (helpers)
     def _decode_pk(self, raw_pk):
         if self.pk_is_str:
             return raw_pk.decode('utf-8', errors='ignore').rstrip('\x00')
@@ -384,12 +382,12 @@ class SequentialIndex:
         return -1
     
     def _find_predecessor(self, pk: int) -> Tuple[int, int]:
-        #Encuentra posiciones del predecesor y sucesor lógico de una PK (pred_pos, succ_pos)
-            # Si el índice está vacío
+        # Encuentra posiciones del predecesor y sucesor lógico de una PK (pred_pos, succ_pos)
         if self.first_logical_pos == -1:
             return (-1, -1)
 
-        current_pos = self.first_logical_pos
+        # Usamos el Sparse Index
+        current_pos = self._sparse_start_pos(pk)
         prev_pos = -1
         
         while current_pos != -1:
@@ -397,7 +395,11 @@ class SequentialIndex:
             page = self.pm.read_page(page_id)
             pk_entry, _, _, next_pos = self._read_by_RID(page, slot_id)
             
-            if pk_entry >= pk:
+            # Prevenir inserción de duplicados aquí mismo
+            if pk_entry == pk:
+                raise ValueError(f"Violación de restricción UNIQUE: la llave primaria {pk} ya existe.")
+                
+            if pk_entry > pk:
                 return (prev_pos, current_pos)
             
             prev_pos = current_pos
@@ -406,13 +408,12 @@ class SequentialIndex:
         return (prev_pos, -1)
     
     def _find_first_greater_equal(self, pk: int) -> Optional[Tuple[int, int]]:
-        """Encuentra el primer entry con pk_entry >= pk.
-        Usa sparse_index (O(log P)) para saltar a la página correcta,
-        luego recorre la cadena lógica."""
+        #Encuentra el primer entry con pk_entry >= pk.
+        #Usa sparse_index (O(log P)) para saltar a la página correcta, luego recorre la cadena lógica
         if self.first_logical_pos == -1:
             return None
         
-        # Usa sparse_index para saltar cerca del objetivo
+        # Usa sparse_index
         start_pos = self._sparse_start_pos(pk)
         
         current_pos = start_pos
