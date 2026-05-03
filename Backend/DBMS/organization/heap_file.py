@@ -1,6 +1,7 @@
 import struct
 import csv
-from typing import List, Tuple, Optional
+import operator
+from typing import List, Tuple, Optional, Any
 from .page_manager import PageManager
 from .data_structures import TableConfig, Record
 
@@ -142,6 +143,74 @@ class HeapFile:
                 records.append(Record(data_tuple, self.config))
         
         return records
+
+    def filter_records(self, column_name: str, operator_str: str, value: Any) -> List[Record]:
+        # Recolectar RIDs eliminados para ignorarlos en el scan lineal
+        deleted_rids = set()
+        curr_rid = self.first_free_rid
+        while curr_rid != (-1, -1):
+            deleted_rids.add(curr_rid)
+            page_id, slot_id = curr_rid
+            try:
+                page = self.pm.read_page(page_id)
+                slot_offset = self._slot_offset(slot_id)
+                if len(page) >= slot_offset + 8:
+                    next_page, next_slot = struct.unpack('<ii', page[slot_offset:slot_offset+8])
+                    curr_rid = (next_page, next_slot)
+                else:
+                    break
+            except Exception:
+                break
+        
+        operator_str = operator_str.upper() if isinstance(operator_str, str) else operator_str
+        
+        ops = {
+            '=': operator.eq,
+            '==': operator.eq,
+            '!=': operator.ne,
+            '>': operator.gt,
+            '>=': operator.ge,
+            '<': operator.lt,
+            '<=': operator.le,
+            'BETWEEN': lambda val, limits: limits[0] <= val <= limits[1]
+        }
+        
+        op_func = ops.get(operator_str)
+        if not op_func:
+            raise ValueError(f"Operador no soportado: {operator_str}")
+            
+        # Validación para BETWEEN
+        if operator_str == 'BETWEEN' and (not isinstance(value, (list, tuple)) or len(value) != 2):
+            raise ValueError("Para el operador BETWEEN, 'value' debe ser una tupla o lista de dos elementos (v1, v2)")
+            
+        results = []
+        # Iterar sobre todas las páginas de datos
+        for page_id in range(1, self.last_page_id + 1):
+            try:
+                page = self.pm.read_page(page_id)
+            except Exception:
+                continue
+                
+            record_count = self._read_page_header(page)
+            for slot_id in range(record_count):
+                # Ignora los RIDs eliminados
+                if (page_id, slot_id) in deleted_rids:
+                    continue
+                
+                record_bytes = self._read_record_from_slot(page, slot_id)
+                data_tuple = struct.unpack(self.config.data_format, record_bytes)
+                record = Record(data_tuple, self.config)
+                
+                record_val = record.get_attribute(column_name)
+                
+                # Manejar comparaciones de strings con padding
+                if isinstance(record_val, str):
+                    record_val = record_val.strip()
+                
+                if op_func(record_val, value):
+                    results.append(record)
+                    
+        return results
     
     def delete(self, rid: Tuple[int, int]) -> bool:
         page_id, slot_id = rid
