@@ -64,6 +64,8 @@ class DBMSEngine:
             
             if tech:
                 if tech == "SEQUENTIAL":
+                    if not col.get("primary_key"):
+                        raise Exception(f"Error Semántico: El índice SEQUENTIAL solo está soportado para la PRIMARY KEY. La columna '{col['nombre']}' no es PK.")
                     if tipo not in ["INT", "DOUBLE"]:
                         raise Exception(f"Error Semántico: SEQUENTIAL solo soporta columnas numéricas. La columna '{col['nombre']}' es {tipo}.")
                 elif tech == "RTREE" and tipo != "POINT":
@@ -197,18 +199,17 @@ class DBMSEngine:
         # Query Optimizer (Seleccion de si usar indice o no y cual indice usar)
 
         es_llave_primaria = col_meta.get("primary_key")
-        tipo_columna = col_meta["tipo"]
+        tipo_columna = col_meta.get("tipo")
+        tech = col_meta.get("index_tech") 
 
-        if es_llave_primaria:
+        # PK con Sequential Index (Solo INT y DOUBLE)
+        if es_llave_primaria and tech == "SEQUENTIAL":
             if search_type == "SEARCH":
                 val = ast["val"]
-
                 if tipo_columna == "INT": 
                     val = int(val)
                 elif tipo_columna == "DOUBLE": 
                     val = float(val)
-                elif isinstance(val, str): 
-                    val = val.strip("'\"")
 
                 print(f"\n[EXECUTE] Index Scan: Buscando PK '{col_name} = {val}' usando Sequential Index...")
                 result = self.storage.search(table_name, val)
@@ -221,7 +222,6 @@ class DBMSEngine:
 
             elif search_type == "RANGE":
                 v1, v2 = ast["range"]
-
                 if tipo_columna == "INT":
                     v1, v2 = int(v1), int(v2)
                 elif tipo_columna == "DOUBLE":
@@ -237,12 +237,23 @@ class DBMSEngine:
                 else:
                     print("   -> 0 registros encontrados.")
                     
-        else:
-            # TODO: Implementar un Full Table Scan en HeapFile O(n) para la busqueda de tipo SEARCH, debe implementarse usando 
-            # un generador/iterador que lea, evalúe y libere página por página.
+        # OTROS ÍNDICES 
+        elif tech == "BTREE":
+            print(f"\n[HOOK] Ejecutando Index Scan usando B-Tree para la columna '{col_name}'.")
+        
+        elif tech == "HASH":
+            if search_type == "RANGE":
+                print(f"\n[ERROR] El índice Extendible Hash no soporta búsquedas por rango (RANGE). Se requiere Full Table Scan.")
+            else:
+                print(f"\n[HOOK] Ejecutando Index Scan usando Extendible Hash para la columna '{col_name}'.")
+                
+        elif tech == "RTREE":
+            print(f"\n[HOOK] Ejecutando Spatial Index Scan usando R-Tree para la columna '{col_name}'.")
             
-            print(f"\n[ADVERTENCIA] La columna '{col_name}' no es la Primary Key y no tiene un índice soportado.")
-            print("[ERROR] Todavía falta el soporte para full table scan.")
+        # Sin índice soportado (Full Table Scan)
+        else:
+            print(f"\n[ADVERTENCIA] La columna '{col_name}' no tiene un índice asignado o no soporta esta operación.")
+            print("[TODO] Falta implementar un Full Table Scan en HeapFile O(N) iterando página por página para evitar OOM.")
             return
 
 
