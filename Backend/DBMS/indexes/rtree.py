@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 import matplotlib.pyplot as plt
-import numpy as np
 import struct
 import heapq
 import os
@@ -25,7 +24,7 @@ PAGE_HEADER_SIZE = struct.calcsize(PAGE_HEADER_FORMAT)
 class NodeEntry:
     MBR: tuple[float, float, float, float]  # (x1,y1,x2,y2)
     PTR: tuple[int, int] # (page_id, offset) para hojas, (page_id, 0) para nodos internos
-NODE_ENTRY_FORMAT = "<4f2i"
+NODE_ENTRY_FORMAT = "<4d2i"
 NODE_ENTRY_SIZE = struct.calcsize(NODE_ENTRY_FORMAT)
 
 class Node:
@@ -87,19 +86,20 @@ class RtreeFile:
     # MAX_ENTRIES = (PAGE_SIZE - PAGE_HEADER_SIZE) // NODE_ENTRY_SIZE
 
     def __init__(self):
-        os.makedirs(os.path.dirname(FILE_DIR), exist_ok=True)
+        os.makedirs(FILE_DIR, exist_ok=True)
         self.FILE_PATH = os.path.join(FILE_DIR, "RtreeFile.bin")
         try:
             self.read_file_header()
-        except FileNotFoundError:
+        except (FileNotFoundError, struct.error):
             self.FILE_HEADER = FileHeader()
+            os.makedirs(os.path.dirname(self.FILE_PATH), exist_ok=True)
             open(self.FILE_PATH, "ab").close()
             self.write_file_header()
         finally:
             self.MAX_ENTRIES = (self.FILE_HEADER.PAGE_SIZE - PAGE_HEADER_SIZE) // NODE_ENTRY_SIZE
 
     def read_page(self, page_id: int) -> Page:
-        offset = self.FILE_HEADER_SIZE + page_id * self.FILE_HEADER.PAGE_SIZE
+        offset = FILE_HEADER_SIZE + page_id * self.FILE_HEADER.PAGE_SIZE
 
         with open(self.FILE_PATH, "rb") as file:
             file.seek(offset)
@@ -114,7 +114,7 @@ class RtreeFile:
         if len(page.DATA) != self.FILE_HEADER.PAGE_SIZE:
             raise ValueError("Tamaño de página incorrecto")
 
-        offset = self.FILE_HEADER_SIZE + page.PAGE_ID * self.FILE_HEADER.PAGE_SIZE
+        offset = FILE_HEADER_SIZE + page.PAGE_ID * self.FILE_HEADER.PAGE_SIZE
         with open(self.FILE_PATH, "rb+") as file:
             file.seek(offset)
             file.write(page.DATA)
@@ -130,15 +130,15 @@ class RtreeFile:
     def read_file_header(self) -> None: 
         with open(self.FILE_PATH, "rb+") as file:
             file.seek(0)
-            header_data = file.read(self.FILE_HEADER_SIZE)
-            header_values = struct.unpack(self.FILE_HEADER_FORMAT, header_data)
+            header_data = file.read(FILE_HEADER_SIZE)
+            header_values = struct.unpack(FILE_HEADER_FORMAT, header_data)
             self.FILE_HEADER = FileHeader(*header_values)
         
     def write_file_header(self) -> None:
         with open(self.FILE_PATH, "rb+") as file:
             file.seek(0)
             file.write(struct.pack(
-                self.FILE_HEADER_FORMAT,
+                FILE_HEADER_FORMAT,
                 self.FILE_HEADER.PAGE_SIZE,
                 self.FILE_HEADER.ROOT_PAGE,
                 self.FILE_HEADER.N_PAGES
@@ -595,7 +595,9 @@ class Rtree:
     # el gráfico se deposita directamente en la dirección de la variable 
     # glboal GRAPH_DIR y la función devuelve su path como string.
     def visualize(self) -> str:
+
         fig, ax = plt.subplots()
+
         root = self._load_node(self.RTREE_FILE.FILE_HEADER.ROOT_PAGE)
 
         def draw_node(node: Node, depth=0):
@@ -604,36 +606,44 @@ class Rtree:
             for e in node.ENTRIES:
                 x1, y1, x2, y2 = e.MBR
 
-                # MBR
                 ax.plot(
                     [x1, x2, x2, x1, x1],
                     [y1, y1, y2, y2, y1],
                     color=color,
                     linewidth=max(1.0, 2.0 - depth * 0.3),
-                    alpha=0.6
+                    alpha=0.5
                 )
 
-                if not node.IS_LEAF:
+                if node.IS_LEAF:
+                    px, py = x1, y1
+                    ax.scatter(px, py, color="black", s=10)
+                else:
                     child = self._load_node(e.PTR[0])
                     draw_node(child, depth + 1)
 
         draw_node(root)
 
-        ax.set_title("R-Tree Gráfico")
+        if root.ENTRIES:
+            root_mbr = self._node_mbr(root)
+            x1, y1, x2, y2 = root_mbr
+
+            ax.plot(
+                [x1, x2, x2, x1, x1],
+                [y1, y1, y2, y2, y1],
+                color="green",
+                linewidth=2.5,
+                linestyle="--",
+                label="Root MBR"
+            )
+
+        ax.set_title("R-Tree Visualization")
         ax.set_aspect("equal")
         ax.grid(True)
 
-        path = os.path.join(GRAPH_DIR, "rtree.png")
         os.makedirs(GRAPH_DIR, exist_ok=True)
+        path = os.path.join(GRAPH_DIR, "rtree.png")
 
         plt.savefig(path, dpi=200, bbox_inches="tight")
         plt.close()
 
         return path
-
-if __name__ == "__main__":
-    rtree = Rtree()
-
-    point = np.array([1,8])
-    print(point)
-    rtree.insert(point, [1, "sdad"])
