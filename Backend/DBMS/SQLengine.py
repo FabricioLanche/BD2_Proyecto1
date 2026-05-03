@@ -45,6 +45,16 @@ class DBMSEngine:
                 size = tipo.split("(")[1].replace(")", "")
                 formato += f"{size}s"
         return formato
+    
+    def _clean_tuple(self, data_tuple):
+        cleaned = []
+        for val in data_tuple:
+            if isinstance(val, bytes):
+                # Decodifica de bytes a string y borra los nulls (\x00) de la derecha
+                cleaned.append(val.decode('utf-8', errors='ignore').rstrip('\x00'))
+            else:
+                cleaned.append(val)
+        return tuple(cleaned)
 
     # --- Lógica Semántica ---
     def _execute_create(self, ast):
@@ -216,7 +226,7 @@ class DBMSEngine:
                 
                 print(f"{result}")
                 if result.records:
-                     print(f"   -> Registro Encontrado: {result.records.data_tuple}")
+                     print(f"   -> Registro Encontrado: {self._clean_tuple(result.records.data_tuple)}")
                 else:
                      print("   -> 0 registros encontrados.")
 
@@ -233,7 +243,7 @@ class DBMSEngine:
                 print(f"{result}")
                 if result.records:
                     for r in result.records:
-                        print(f"   -> Registro: {r.data_tuple}")
+                        print(f"   -> Registro: {self._clean_tuple(r.data_tuple)}")
                 else:
                     print("   -> 0 registros encontrados.")
                     
@@ -252,9 +262,34 @@ class DBMSEngine:
             
         # Sin índice soportado (Full Table Scan)
         else:
-            print(f"\n[ADVERTENCIA] La columna '{col_name}' no tiene un índice asignado o no soporta esta operación.")
-            print("[TODO] Falta implementar un Full Table Scan en HeapFile O(N) iterando página por página para evitar OOM.")
-            return
+            print(f"\n[ADVERTENCIA] La columna '{col_name}' no tiene un índice asignado")
+
+            if search_type == "SEARCH":
+                op = "="
+                val = ast["val"]
+                if tipo_columna == "INT": val = int(val)
+                elif tipo_columna == "DOUBLE": val = float(val)
+                elif isinstance(val, str): val = val.strip("'\"")
+                
+            elif search_type == "RANGE":
+                op = "BETWEEN"
+                v1, v2 = ast["range"]
+                if tipo_columna == "INT": v1, v2 = int(v1), int(v2)
+                elif tipo_columna == "DOUBLE": v1, v2 = float(v1), float(v2)
+                elif isinstance(v1, str) and isinstance(v2, str):
+                    v1, v2 = v1.strip("'\""), v2.strip("'\"")
+                val = (v1, v2) # filter_records espera una tupla para BETWEEN
+            
+            try:
+                tabla = self.storage._tables[table_name]
+                resultados = tabla.heap.filter_records(col_name, op, val)
+                
+                print(f"Full Table Scan completado.")
+                print(f"   -> Registros que cumplen la condición ({len(resultados)}):")
+                for r in resultados:
+                    print(f"      * {self._clean_tuple(r.data_tuple)}")
+            except Exception as e:
+                print(f"[ERROR] Fallo en el escaneo: {e}")
 
 
     def _execute_delete(self, ast):

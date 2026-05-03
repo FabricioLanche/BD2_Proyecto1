@@ -505,13 +505,15 @@ class SequentialIndex:
     
     def _allocate_entry_in_aux(self) -> int:
         #Asigna un espacio para una nueva entrada en área auxiliar.
-        total_entries = self.n_main + self.k_aux         # asigna al final del archivo
-
+        #total_entries = self.n_main + self.k_aux         # asigna al final del archivo
+        page_offset = self.k_aux // self.entries_per_page
+    
         # ¿En qué página va?
-        page_id = (total_entries // self.entries_per_page) + 1
-        
+        #page_id = (total_entries // self.entries_per_page) + 1
+        page_id = self.last_main_page + 1 + page_offset
         # ¿En qué slot?
-        slot_id = total_entries % self.entries_per_page
+        #slot_id = total_entries % self.entries_per_page
+        slot_id = self.k_aux % self.entries_per_page
         
         # Posición absoluta en bytes
         pos = ((page_id-1) * self.pm.PAGE_SIZE) + 4 + (slot_id * self.NODE_SIZE)

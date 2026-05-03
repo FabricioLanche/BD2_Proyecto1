@@ -1,4 +1,4 @@
-from Backend.DBMS.SQLengine import DBMSEngine
+from DBMS.SQLengine import DBMSEngine
 
 def main():
     print("=========================================")
