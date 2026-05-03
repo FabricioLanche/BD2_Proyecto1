@@ -2,6 +2,7 @@ import struct
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional
 from organization.page_manager import PageManager
+from bisect import bisect_left #busqueda binaria
 
 @dataclass
 class BPlusHeader:
@@ -133,3 +134,59 @@ class BPlusTree:
         header = NodeHeader(is_leaf=is_leaf, num_keys=0, parent=-1)
         node = LeafNode(header) if is_leaf else InternalNode(header)
         return page_id, node
+    
+    # Búsqueda y recorrido
+    def _find_leaf(self, key: int) -> Tuple[int, LeafNode]:
+        current_page_id = self.header.root_page_id
+        node = self._read_node(current_page_id)
+
+        while not node.header.is_leaf:
+            i = bisect_left(node.keys, key)
+            
+            # Si la llave es igual a una en el nodo interno, vamos al hijo derecho (i+1)
+            # pero bisect_left con >= nos da el índice exacto para B+
+            if i < len(node.keys) and key == node.keys[i]:
+                next_page = node.children[i + 1]
+            else:
+                next_page = node.children[i]
+            
+            current_page_id = next_page
+            node = self._read_node(current_page_id)
+
+        return current_page_id, node
+
+    def search(self, key: int) -> Optional[Tuple[int, int]]:
+        if self.header.root_page_id == -1:
+            return None
+        
+        _, leaf = self._find_leaf(key)
+        
+        i = bisect_left(leaf.keys, key)
+        if i < len(leaf.keys) and leaf.keys[i] == key:
+            return leaf.values[i]
+        return None 
+    
+    # Busqueda por rango
+    def range_search(self, start_key: int, end_key: int) -> List[Tuple[int, int]]:
+        results = []
+        if self.header.root_page_id == -1:
+            return results
+        
+        current_page_id, leaf = self._find_leaf(start_key)
+
+        while True:
+            idx = bisect_left(leaf.keys, start_key)
+            
+            for i in range(idx, len(leaf.keys)):
+                if leaf.keys[i] > end_key:
+                    return results
+                results.append(leaf.values[i])
+
+            if leaf.next_leaf == -1:
+                break
+
+            # Moverse a la siguiente página física (Lado Físico)
+            current_page_id = leaf.next_leaf
+            leaf = self._read_node(current_page_id)
+
+        return results
