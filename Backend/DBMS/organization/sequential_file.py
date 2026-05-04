@@ -245,18 +245,22 @@ class SequentialIndex:
         # FASE 1 — Cargar auxiliares en RAM
         # k_aux ≤ ceil(log₂ n)  →  siempre pequeño
         # I/O: k_aux lecturas 
-        aux_entries = [] 
+        aux_entries = []
 
-        for page_id in range(self.last_main_page + 1, self.last_main_page + 1 + self.k_aux + 1):
-            try:
+        # Aux pages are stored AFTER the main pages. Each aux page can hold many entries;
+        # we must scan only the pages that may actually contain aux entries.
+        if self.k_aux > 0:
+            aux_pages = (self.k_aux + self.entries_per_page - 1) // self.entries_per_page
+            aux_start = self.last_main_page + 1
+            aux_end   = aux_start + aux_pages
+
+            for page_id in range(aux_start, aux_end):
                 page = self.pm.read_page(page_id)
-            except Exception:
-                break
-            entry_count = self._read_page_header(page)
-            for slot in range(entry_count):
-                pk, rp, rs, _ = self._read_by_RID(page, slot)
-                if not pk==self._tombstone_pk():
-                    aux_entries.append((pk, rp, rs))
+                entry_count = self._read_page_header(page)
+                for slot in range(entry_count):
+                    pk, rp, rs, _ = self._read_by_RID(page, slot)
+                    if pk != self._tombstone_pk():
+                        aux_entries.append((pk, rp, rs))
 
         aux_entries.sort(key=lambda x: x[0])
         aux_ptr = 0
@@ -504,18 +508,11 @@ class SequentialIndex:
         return None
     
     def _allocate_entry_in_aux(self) -> int:
-        #Asigna un espacio para una nueva entrada en área auxiliar.
-        total_entries = self.n_main + self.k_aux         # asigna al final del archivo
-
-        # ¿En qué página va?
-        page_id = (total_entries // self.entries_per_page) + 1
-        
-        # ¿En qué slot?
-        slot_id = total_entries % self.entries_per_page
-        
-        # Posición absoluta en bytes
-        pos = ((page_id-1) * self.pm.PAGE_SIZE) + 4 + (slot_id * self.NODE_SIZE)
-        
+        # k_aux = cuántas entradas aux ya existen → índice 0-based de la nueva
+        page_offset = self.k_aux // self.entries_per_page
+        slot_id     = self.k_aux % self.entries_per_page
+        page_id     = self.last_main_page + 1 + page_offset
+        pos = (page_id - 1) * self.pm.PAGE_SIZE + 4 + slot_id * self.NODE_SIZE
         return pos
     
     def _pos_to_page_slot(self, pos: int) -> Tuple[int, int]:
@@ -532,13 +529,12 @@ class SequentialIndex:
         #Escribe una entrada en una posición absoluta
         page_id, slot_id = self._pos_to_page_slot(pos)
         page = bytearray(self.pm.read_page(page_id))
-        
-        # Actualizar entry_count en el header
-        current_entry_count = self._read_page_header(page)
-        new_entry_count = max(current_entry_count, slot_id + 1)
-        
         self._write_entry_on_page(page, slot_id, pk, rid_p, rid_s, next_pos)
-        self._write_page_header(page, new_entry_count)
+        
+        # Actualiza header si este slot extiende el conteo
+        current_count = self._read_page_header(page)
+        if slot_id >= current_count:
+            self._write_page_header(page, slot_id + 1)
         self.pm.write_page(page_id, bytes(page))
     
     def _read_by_RID(self, page: bytes, slot_idx: int) -> Tuple[int, int, int, int]:
