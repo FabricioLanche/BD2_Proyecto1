@@ -11,6 +11,7 @@ type MainLayoutProps = {
   topHeight: number
   gridRef: RefObject<HTMLDivElement | null>
   sideRef: RefObject<HTMLDivElement | null>
+  isQueryEditorCollapsed: boolean
 }
 
 export function MainLayout({
@@ -24,6 +25,7 @@ export function MainLayout({
   topHeight,
   gridRef,
   sideRef,
+  isQueryEditorCollapsed,
 }: MainLayoutProps) {
   return (
     <div className="app-shell">
@@ -34,7 +36,12 @@ export function MainLayout({
         className="app-grid"
         style={{ gridTemplateColumns: `${leftWidth}px var(--splitter-size) minmax(0, 1fr)` }}
       >
-        {leftPanel}
+        <div style={{ position: 'relative', overflow: 'hidden' }}>
+          {leftPanel}
+          {isQueryEditorCollapsed && (
+            <div className="collapse-overlay" />
+          )}
+        </div>
         <div
           className="splitter splitter-vertical"
           role="separator"
@@ -59,5 +66,4 @@ export function MainLayout({
     </div>
   )
 }
-
 

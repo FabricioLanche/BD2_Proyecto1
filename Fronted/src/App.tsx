@@ -8,13 +8,11 @@ import { QueryEditor } from './components/QueryEditor'
 import { QueryTabs } from './components/QueryTabs'
 import { MainLayout } from './components/MainLayout'
 
-// Constants (can be re-enabled if min/max limiting is needed again)
-const MIN_LEFT_WIDTH = 420
-const MIN_RIGHT_WIDTH = 320
-const MIN_TOP_HEIGHT = 200
-const MIN_BOTTOM_HEIGHT = 200
+// Constants
+const MIN_RIGHT_WIDTH = 50
+const MIN_BOTTOM_HEIGHT = 50
 const COLLAPSE_WIDTH = 50 // Mínimo antes de colapsar completamente
-const SPLITTER_SIZE = 20
+const SPLITTER_SIZE = 12 // Debe coincidir con --splitter-size en index.css
 
 type QueryTab = {
   id: string
@@ -54,8 +52,11 @@ export default function App() {
   // Layout state
   const [leftWidth, setLeftWidth] = useState(720)
   const [topHeight, setTopHeight] = useState(280)
-  const [isVerticalSnapping, setIsVerticalSnapping] = useState(false)
-  const [isHorizontalSnapping, setIsHorizontalSnapping] = useState(false)
+
+  // Detect when Query Editor is reduced to 70% of initial size (420px)
+  const INITIAL_LEFT_WIDTH = 420
+  const COLLAPSE_THRESHOLD = INITIAL_LEFT_WIDTH * 0.5 // 294px
+  const isQueryEditorCollapsed = leftWidth < COLLAPSE_THRESHOLD
 
   // Refs for dragging
   const dragRef = useRef<DragState>({
@@ -65,8 +66,6 @@ export default function App() {
     startSize: 0,
     containerSize: 0,
   })
-  const prevLeftWidthRef = useRef(leftWidth)
-  const prevTopHeightRef = useRef(topHeight)
 
   const gridRef = useRef<HTMLDivElement | null>(null)
   const sideRef = useRef<HTMLDivElement | null>(null)
@@ -100,14 +99,7 @@ export default function App() {
       if (dragState.type === 'vertical' && gridRef.current) {
         const maxLeft = dragState.containerSize - MIN_RIGHT_WIDTH - SPLITTER_SIZE
         const rawValue = dragState.startSize + (event.clientX - dragState.startX)
-
-        // Snap brusco: si está entre COLLAPSE_WIDTH y MIN_LEFT_WIDTH, fuerza a uno u otro
-        let nextLeft = Math.min(Math.max(rawValue, COLLAPSE_WIDTH), maxLeft)
-
-        if (nextLeft > COLLAPSE_WIDTH && nextLeft < MIN_LEFT_WIDTH) {
-          // Está en la zona "gris", determina hacia dónde forzar basado en velocidad
-          nextLeft = rawValue > (COLLAPSE_WIDTH + MIN_LEFT_WIDTH) / 2 ? MIN_LEFT_WIDTH : COLLAPSE_WIDTH
-        }
+        const nextLeft = Math.min(Math.max(rawValue, COLLAPSE_WIDTH), maxLeft)
 
         setLeftWidth(nextLeft)
       }
@@ -115,14 +107,7 @@ export default function App() {
       if (dragState.type === 'horizontal' && sideRef.current) {
         const maxTop = dragState.containerSize - MIN_BOTTOM_HEIGHT - SPLITTER_SIZE
         const rawValue = dragState.startSize + (event.clientY - dragState.startY)
-
-        // Snap brusco: si está entre COLLAPSE_WIDTH y MIN_TOP_HEIGHT, fuerza a uno u otro
-        let nextTop = Math.min(Math.max(rawValue, COLLAPSE_WIDTH), maxTop)
-
-        if (nextTop > COLLAPSE_WIDTH && nextTop < MIN_TOP_HEIGHT) {
-          // Está en la zona "gris", determina hacia dónde forzar basado en velocidad
-          nextTop = rawValue > (COLLAPSE_WIDTH + MIN_TOP_HEIGHT) / 2 ? MIN_TOP_HEIGHT : COLLAPSE_WIDTH
-        }
+        const nextTop = Math.min(Math.max(rawValue, COLLAPSE_WIDTH), maxTop)
 
         setTopHeight(nextTop)
       }
@@ -313,7 +298,7 @@ export default function App() {
 
   // Right bottom panel - wrap in Card to apply collapsed styling
   const rightBottomPanel = (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, minWidth: 0 }}>
       <OutputPanel output={output} isRestarting={isRestarting} onRestart={handleRestart} />
     </div>
   )
@@ -331,6 +316,7 @@ export default function App() {
         topHeight={topHeight}
         gridRef={gridRef}
         sideRef={sideRef}
+        isQueryEditorCollapsed={isQueryEditorCollapsed}
       />
 
       <input

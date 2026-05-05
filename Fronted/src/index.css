@@ -94,15 +94,34 @@ body {
   gap: 0;
   flex: 1;
   min-height: 0;
+  min-width: 0;
   align-items: stretch;
-  transition: all 0.3s ease;
+}
+
+/* Collapse overlay */
+.collapse-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #ffffff;
+  border: 3px solid var(--panel-line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.is-collapsed .panel {
+  background: #fff;
 }
 
 .app-side {
   display: grid;
   gap: 0;
   min-height: 0;
-  transition: all 0.3s ease;
+  min-width: 0;
 }
 
 /* Splitter */
@@ -110,7 +129,6 @@ body {
   background: transparent;
   position: relative;
   border-radius: 999px;
-  transition: background 0.2s ease;
 }
 
 .splitter::before {
@@ -160,6 +178,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -203,6 +222,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -212,18 +232,21 @@ body {
   gap: 16px;
   flex: 1;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 
 .panel-query {
   height: 100%;
   min-height: 0;
+  min-width: 0;
 }
 
 .panel-output {
   flex: 1;
   height: 100%;
   min-height: 0;
+  min-width: 0;
 }
 
 .panel-footer {
@@ -261,7 +284,6 @@ body {
   padding: 6px 12px;
   font-size: 13px;
   cursor: pointer;
-  transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -283,7 +305,6 @@ body {
   color: currentColor;
   opacity: 0;
   transform: scale(0.85);
-  transition: opacity 0.2s ease, transform 0.2s ease, background 0.2s ease;
 }
 
 .query-tab:hover .query-tab-close,
@@ -370,6 +391,7 @@ body {
   display: grid;
   gap: 10px;
   overflow-y: auto;
+  min-width: 0;
 }
 
 .dataset-item {
@@ -378,6 +400,9 @@ body {
   border: 2px solid rgba(12, 15, 18, 0.15);
   background: #fff;
   font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .dataset-empty {
@@ -400,6 +425,9 @@ body {
   background: #0f1418;
   color: #f3f7f9;
   overflow: auto;
+  min-width: 0;
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 
 /* Button Styles */
@@ -413,7 +441,6 @@ body {
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .btn:disabled {
