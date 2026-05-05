@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { executeQuery, fetchDatasets, restartBackend, uploadDataset } from './api/api'
+import { deleteDataset, executeQuery, fetchDatasets, restartBackend, uploadDataset } from './api/api'
 import { Button } from './components/Button'
 import { Card } from './components/Card'
 import { DatasetsPanel } from './components/DatasetsPanel'
@@ -51,6 +51,8 @@ export default function App() {
 
   // Loading states
   const [isLoadingDatasets, setIsLoadingDatasets] = useState(false)
+  const [datasetOperation, setDatasetOperation] = useState<'idle' | 'uploading' | 'deleting'>('idle')
+  const [uploadProgress, setUploadProgress] = useState(0)
   const [isExecuting, setIsExecuting] = useState(false)
   const [isRestarting, setIsRestarting] = useState(false)
   const [statusMessage, setStatusMessage] = useState<string>('')
@@ -87,6 +89,7 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const activeTab = tabs.find((tab) => tab.id === activeId) ?? tabs[0]
+  const isDatasetsBusy = isLoadingDatasets || datasetOperation !== 'idle'
 
   // Initialize dimensions
   useEffect(() => {
@@ -274,19 +277,42 @@ export default function App() {
     fileInputRef.current?.click()
   }
 
+  const handleDeleteDataset = async (datasetName: string) => {
+    setStatusMessage('')
+    setDatasetOperation('deleting')
+    try {
+      const message = await deleteDataset(datasetName)
+      setStatusMessage(message)
+      await loadDatasets()
+    } catch (error) {
+      setStatusMessage('No se pudo eliminar el dataset.')
+    } finally {
+      setDatasetOperation('idle')
+    }
+  }
+
   const handleUploadChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
 
     setStatusMessage('')
+    setDatasetOperation('uploading')
+    setIsLoadingDatasets(true)
+    setUploadProgress(0)
+
     try {
-      const message = await uploadDataset(file)
+      const message = await uploadDataset(file, (progress) => {
+        setUploadProgress(progress)
+      })
       setStatusMessage(message)
       await loadDatasets()
     } catch (error) {
       setStatusMessage('No se pudo subir el dataset.')
     } finally {
       event.target.value = ''
+      setIsLoadingDatasets(false)
+      setUploadProgress(0)
+      setDatasetOperation('idle')
     }
   }
 
@@ -341,8 +367,11 @@ export default function App() {
   const rightTopPanel = (
     <DatasetsPanel
       datasets={datasets}
-      isLoading={isLoadingDatasets}
+      isLoading={isDatasetsBusy}
+      operation={datasetOperation}
+      uploadProgress={uploadProgress}
       onUploadClick={handleUploadClick}
+      onDeleteDataset={handleDeleteDataset}
     />
   )
 

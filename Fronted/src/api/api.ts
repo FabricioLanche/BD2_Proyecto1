@@ -1,4 +1,4 @@
-import axios from 'axios'
+import axios, { type AxiosProgressEvent } from 'axios'
 
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL,
@@ -22,12 +22,27 @@ export async function fetchDatasets(): Promise<string[]> {
   return data.datasets ?? []
 }
 
-export async function uploadDataset(file: File): Promise<string> {
+export async function uploadDataset(
+  file: File,
+  onProgress?: (progress: number) => void,
+): Promise<string> {
   const formData = new FormData()
   formData.append('file', file)
 
-  const { data } = await api.post<{ message?: string }>('/dataset', formData)
+  const { data } = await api.post<{ message?: string }>('/dataset', formData, {
+    onUploadProgress: (event: AxiosProgressEvent) => {
+      if (event.total && onProgress) {
+        const progress = Math.round((event.loaded / event.total) * 100)
+        onProgress(progress)
+      }
+    },
+  })
   return data.message ?? 'Dataset cargado'
+}
+
+export async function deleteDataset(filename: string): Promise<string> {
+  const { data } = await api.delete<{ message?: string }>(`/dataset/${encodeURIComponent(filename)}`)
+  return data.message ?? 'Dataset eliminado'
 }
 
 export async function restartBackend(): Promise<string> {

@@ -1,4 +1,4 @@
 fastapi[standard]>=0.95.2
 uvicorn[standard]>=0.22.0
 matplotlib>=3.7.0
-numpy>=2.4.0
+numpy>=2.0.0
