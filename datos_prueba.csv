@@ -1,3 +1,4 @@
-id,nombre,ubicacion_x,ubicacion_y
-4,Trujillo,-8.11599,-79.02998
-5,Piura,-5.19449,-80.63282
+id,nombre,latitud,longitud
+1,Lima,-12.04,-77.02
+2,Cusco,-13.52,-71.96
+3,Trujillo,-8.11,-79.02

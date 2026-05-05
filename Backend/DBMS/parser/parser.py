@@ -137,13 +137,13 @@ class SQLParser:
                 self.match('RADIUS')
                 r = float(self.match('NUM').value)
                 self.match('OP') # )
-                return {"action": "SELECT", "type": "RTREE_RADIUS", "table": table, "point": [x, y], "radius": r}
+                return {"action": "SELECT", "type": "RTREE_RADIUS", "table": table, "col": col, "point": [x, y], "radius": r}
                 
             elif self.current().type == 'K':
                 self.match('K')
                 k = int(self.match('NUM').value)
                 self.match('OP') # )
-                return {"action": "SELECT", "type": "RTREE_KNN", "table": table, "point": [x, y], "k": k}
+                return {"action": "SELECT", "type": "RTREE_KNN", "table": table, "col": col, "point": [x, y], "k": k}
 
     def parse_id_list(self):
         ids = []
