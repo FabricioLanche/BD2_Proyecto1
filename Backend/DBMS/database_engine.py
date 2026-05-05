@@ -57,7 +57,8 @@ class DatabaseEngine:
         csv_path: str,
         pk_col: str,
     ) -> QueryResult:
-        # Crea la tabla, carga el CSV en el HeapFile y construye el índice.
+        # Crea la tabla, carga el CSV en el HeapFile y construye el índice
+        # Para las cargas masivas se deshabilita reconstrucciones y se hace batch indexing
         
         if table_name in self._tables:
             raise ValueError(f"Tabla '{table_name}' ya existe.")
@@ -80,17 +81,40 @@ class DatabaseEngine:
 
         t0 = time.perf_counter()
 
-        # 1. Carga CSV → HeapFile
-        print(f"  Cargando CSV: {csv_path}...")
-        rids = heap.load_from_csv(csv_path)
+        # Deshabilitar reconstrucciones durante carga masiva y activar bulk_load_mode
+        original_k_limit = index.k_limit
+        index.k_limit = 1_000_000
+        
+        index.bulk_load_mode = True
 
-        # 2. Construye índice
-        print(f"  Indexando {len(rids)} registros...")
-        for i, rid in enumerate(rids):
-            record = heap.search(rid)
-            index.add(record.get_pk(), rid)
+        # 1. Cargar CSV y retornar (RID, data_tuple)
+        print(f"  Cargando CSV: {csv_path}...")
+        results = heap.load_from_csv_optimized(csv_path)
+        print(f"  ✓ {len(results)} registros en heap")
+
+        # 2. Indexar utilizando el return anterior -> se evita llamar heap.search()
+        print(f"  Indexando {len(results)} registros...")
+        for i, (rid, data_tuple) in enumerate(results):
+            pk = data_tuple[0]
+            index.add(pk, rid)
             if (i + 1) % 10_000 == 0:
-                print(f"    {i + 1}/{len(rids)} indexados")
+                elapsed_partial = (time.perf_counter() - t0) * 1000
+                print(f"    {i + 1}/{len(results)} indexados ({elapsed_partial:.1f}ms)")
+        
+        # Escribir todas las páginas indexadas a disco
+        print(f"  Flushing índice a disco ({len(index._dirty_pages)} páginas)...")
+        index.flush_metadata()
+        
+        # Deshabilitar bulk_load_mode
+        index.bulk_load_mode = False
+        
+        # Restaurar k_limit original
+        index.k_limit = original_k_limit
+        
+        # Si quedó con auxiliares, hacer un reconstruct limpio
+        if index.k_aux > 0:
+            print(f"  Limpiando auxiliares ({index.k_aux} entradas)...")
+            index.reconstruct()
 
         elapsed = (time.perf_counter() - t0) * 1000
 
@@ -98,7 +122,7 @@ class DatabaseEngine:
         self._tables[table_name] = entry
 
         result = QueryResult([], io_counter.snapshot(), elapsed, "CREATE+LOAD")
-        result.records = len(rids)  # devuelve cantidad de filas cargadas
+        result.records = len(results)  # devuelve cantidad de filas cargadas
         print(f"  Tabla '{table_name}' lista. {result}")
 
         # Flush metadata tras carga masiva
@@ -113,10 +137,8 @@ class DatabaseEngine:
         config: TableConfig,
         pk_col: str,
     ) -> None:
-        """
-        Abre una tabla que ya existe en disco (sin cargar CSV).
-        Útil para reabrir el engine entre sesiones.
-        """
+        # Abre una tabla que ya existe en disco (sin cargar CSV).
+
         if table_name in self._tables:
             return  # ya está abierta
 

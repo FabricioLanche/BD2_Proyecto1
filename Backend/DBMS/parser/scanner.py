@@ -24,6 +24,8 @@ class Scanner:
         ('AND', r'AND\b'),
         ('IN', r'IN\b'),
         ('VALUES', r'VALUES\b'),
+        ('MAPPED', r'MAPPED\b'),
+        ('BY', r'BY\b'),
         ('POINT_TYPE', r'POINT\b'), 
         ('RADIUS', r'RADIUS\b'),
         ('K', r'K\b'),
