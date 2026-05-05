@@ -99,6 +99,86 @@ body {
 }
 
 /* Collapse overlay */
+.left-panel-stage {
+  position: relative;
+  overflow: hidden;
+}
+
+.left-panel-stage .panel {
+  transition: transform 160ms ease-out, opacity 160ms ease-out, filter 160ms ease-out;
+  transform-origin: center center;
+}
+
+.side-stage .panel {
+  transition: transform 160ms ease-out, opacity 160ms ease-out, filter 160ms ease-out;
+  transform-origin: center center;
+}
+
+.top-panel-stage .panel {
+  transition: transform 160ms ease-out, opacity 160ms ease-out, filter 160ms ease-out;
+  transform-origin: center center;
+}
+
+.right-panel-stage .panel {
+  transition: transform 160ms ease-out, opacity 160ms ease-out, filter 160ms ease-out;
+  transform-origin: center center;
+}
+
+.side-stage {
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+}
+
+.side-stage > .app-side {
+  height: 100%;
+}
+
+.top-panel-stage {
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+}
+
+.top-panel-stage > .panel {
+  height: 100%;
+}
+
+.right-panel-stage {
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+  min-width: 0;
+}
+
+.left-panel-stage.is-collapsed .panel {
+  opacity: 0.96;
+  transform: scale(0.9);
+  filter: saturate(0.9);
+}
+
+.side-stage.is-collapsed .panel {
+  opacity: 0.96;
+  transform: scale(0.9);
+  filter: saturate(0.9);
+}
+
+.top-panel-stage.is-collapsed .panel {
+  opacity: 0.96;
+  transform: scale(0.9);
+  filter: saturate(0.9);
+}
+
+.right-panel-stage.is-collapsed .panel {
+  opacity: 0.96;
+  transform: scale(0.9);
+  filter: saturate(0.9);
+}
+
 .collapse-overlay {
   position: absolute;
   top: 0;
@@ -111,10 +191,39 @@ body {
   box-shadow: var(--shadow);
   z-index: 10;
   pointer-events: none;
+  animation: collapse-overlay-enter 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.collapse-overlay.is-exiting {
+  animation: collapse-overlay-exit 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .is-collapsed .panel {
   background: #fff;
+}
+
+@keyframes collapse-overlay-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes collapse-overlay-exit {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(0.5);
+  }
 }
 
 .app-side {
@@ -242,6 +351,12 @@ body {
   min-width: 0;
 }
 
+.panel-datasets {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
 .panel-output {
   flex: 1;
   height: 100%;
@@ -274,6 +389,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  align-items: flex-start;
 }
 
 .query-tab {
@@ -287,6 +403,8 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-height: 34px;
+  box-sizing: border-box;
 }
 
 .query-tab-label {
@@ -296,32 +414,41 @@ body {
 .query-tab-close {
   width: 18px;
   height: 18px;
+  flex: 0 0 18px;
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-size: 14px;
+  font-weight: 700;
   line-height: 1;
-  color: currentColor;
-  opacity: 0;
-  transform: scale(0.85);
+  color: #000;
+  background: transparent;
+  opacity: 0.8;
+  transform: scale(1);
+}
+
+.query-tab-close.is-hidden {
+  visibility: hidden;
 }
 
 .query-tab:hover .query-tab-close,
 .query-tab:focus-visible .query-tab-close,
 .query-tab.is-active .query-tab-close {
-  opacity: 0.85;
+  opacity: 1;
   transform: scale(1);
 }
 
 .query-tab-close:hover {
-  background: rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.06);
 }
 
 .query-tab.is-active {
   background: var(--accent);
   color: #fff;
-  transform: translateY(-1px);
+  position: relative;
+  z-index: 1;
+  transform: none;
 }
 
 .query-tab-add {
@@ -392,6 +519,15 @@ body {
   gap: 10px;
   overflow-y: auto;
   min-width: 0;
+}
+
+.panel-datasets .dataset-list {
+  flex: 1;
+  min-height: 0;
+}
+
+.panel-datasets .panel-footer {
+  margin-top: auto;
 }
 
 .dataset-item {

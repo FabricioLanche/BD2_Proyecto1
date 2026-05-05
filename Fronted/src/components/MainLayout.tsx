@@ -1,4 +1,31 @@
-import type { ReactNode, PointerEvent as ReactPointerEvent, RefObject } from 'react'
+import { useEffect, useState, type ReactNode, PointerEvent as ReactPointerEvent, RefObject } from 'react'
+
+const COLLAPSE_OVERLAY_ANIMATION_MS = 180
+
+function useOverlayVisibility(isCollapsed: boolean) {
+  const [overlayVisible, setOverlayVisible] = useState(isCollapsed)
+  const [overlayExiting, setOverlayExiting] = useState(false)
+
+  useEffect(() => {
+    if (isCollapsed) {
+      setOverlayVisible(true)
+      setOverlayExiting(false)
+      return undefined
+    }
+
+    if (!overlayVisible) return undefined
+
+    setOverlayExiting(true)
+    const timeoutId = window.setTimeout(() => {
+      setOverlayVisible(false)
+      setOverlayExiting(false)
+    }, COLLAPSE_OVERLAY_ANIMATION_MS)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [isCollapsed, overlayVisible])
+
+  return { overlayVisible, overlayExiting }
+}
 
 type MainLayoutProps = {
   header: ReactNode
@@ -12,6 +39,9 @@ type MainLayoutProps = {
   gridRef: RefObject<HTMLDivElement | null>
   sideRef: RefObject<HTMLDivElement | null>
   isQueryEditorCollapsed: boolean
+  isRightPanelCollapsed: boolean
+  isDatasetsCollapsed: boolean
+  isOutputCollapsed: boolean
 }
 
 export function MainLayout({
@@ -26,7 +56,15 @@ export function MainLayout({
   gridRef,
   sideRef,
   isQueryEditorCollapsed,
+  isRightPanelCollapsed,
+  isDatasetsCollapsed,
+  isOutputCollapsed,
 }: MainLayoutProps) {
+  const leftOverlay = useOverlayVisibility(isQueryEditorCollapsed)
+  const rightSideOverlay = useOverlayVisibility(isRightPanelCollapsed)
+  const topOverlay = useOverlayVisibility(isDatasetsCollapsed)
+  const bottomOverlay = useOverlayVisibility(isOutputCollapsed)
+
   return (
     <div className="app-shell">
       <header className="app-header">{header}</header>
@@ -36,10 +74,10 @@ export function MainLayout({
         className="app-grid"
         style={{ gridTemplateColumns: `${leftWidth}px var(--splitter-size) minmax(0, 1fr)` }}
       >
-        <div style={{ position: 'relative', overflow: 'hidden' }}>
+        <div className={`left-panel-stage ${isQueryEditorCollapsed ? 'is-collapsed' : ''}`}>
           {leftPanel}
-          {isQueryEditorCollapsed && (
-            <div className="collapse-overlay" />
+          {leftOverlay.overlayVisible && (
+            <div className={`collapse-overlay ${leftOverlay.overlayExiting ? 'is-exiting' : ''}`} />
           )}
         </div>
         <div
@@ -48,19 +86,34 @@ export function MainLayout({
           aria-orientation="vertical"
           onPointerDown={verticalSplitterOnDragStart}
         />
-        <div
-          ref={sideRef}
-          className="app-side"
-          style={{ gridTemplateRows: `${topHeight}px var(--splitter-size) minmax(0, 1fr)` }}
-        >
-          {rightTopPanel}
+        <div className={`side-stage ${isRightPanelCollapsed ? 'is-collapsed' : ''}`}>
           <div
-            className="splitter splitter-horizontal"
-            role="separator"
-            aria-orientation="horizontal"
-            onPointerDown={horizontalSplitterOnDragStart}
-          />
-          {rightBottomPanel}
+            ref={sideRef}
+            className="app-side"
+            style={{ gridTemplateRows: `${topHeight}px var(--splitter-size) minmax(0, 1fr)` }}
+          >
+            <div className={`top-panel-stage ${isDatasetsCollapsed ? 'is-collapsed' : ''}`}>
+              {rightTopPanel}
+              {topOverlay.overlayVisible && (
+                <div className={`collapse-overlay ${topOverlay.overlayExiting ? 'is-exiting' : ''}`} />
+              )}
+            </div>
+            <div
+              className="splitter splitter-horizontal"
+              role="separator"
+              aria-orientation="horizontal"
+              onPointerDown={horizontalSplitterOnDragStart}
+            />
+            <div className={`right-panel-stage ${isOutputCollapsed ? 'is-collapsed' : ''}`}>
+              {rightBottomPanel}
+              {bottomOverlay.overlayVisible && (
+                <div className={`collapse-overlay ${bottomOverlay.overlayExiting ? 'is-exiting' : ''}`} />
+              )}
+            </div>
+          </div>
+          {rightSideOverlay.overlayVisible && (
+            <div className={`collapse-overlay ${rightSideOverlay.overlayExiting ? 'is-exiting' : ''}`} />
+          )}
         </div>
       </main>
     </div>

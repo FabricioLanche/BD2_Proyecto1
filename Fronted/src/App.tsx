@@ -13,6 +13,12 @@ const MIN_RIGHT_WIDTH = 50
 const MIN_BOTTOM_HEIGHT = 50
 const COLLAPSE_WIDTH = 50 // Mínimo antes de colapsar completamente
 const SPLITTER_SIZE = 12 // Debe coincidir con --splitter-size en index.css
+const INITIAL_LEFT_WIDTH = 420
+const INITIAL_TOP_HEIGHT = 280
+const LEFT_COLLAPSE_PERCENT = 0.75
+const RIGHT_COLLAPSE_PERCENT = 0.35
+const TOP_COLLAPSE_PERCENT = 0.8
+const BOTTOM_COLLAPSE_PERCENT = 0.5
 
 type QueryTab = {
   id: string
@@ -52,11 +58,20 @@ export default function App() {
   // Layout state
   const [leftWidth, setLeftWidth] = useState(720)
   const [topHeight, setTopHeight] = useState(280)
+  const [sideHeight, setSideHeight] = useState(0)
+  const [gridWidth, setGridWidth] = useState(0)
 
-  // Detect when Query Editor is reduced to 70% of initial size (420px)
-  const INITIAL_LEFT_WIDTH = 420
-  const COLLAPSE_THRESHOLD = INITIAL_LEFT_WIDTH * 0.5 // 294px
-  const isQueryEditorCollapsed = leftWidth < COLLAPSE_THRESHOLD
+  // Detect collapse state with one independent threshold per panel.
+  const leftCollapseThreshold = INITIAL_LEFT_WIDTH * LEFT_COLLAPSE_PERCENT
+  const rightCollapseThreshold = Math.max(gridWidth - INITIAL_LEFT_WIDTH - SPLITTER_SIZE, 0) * RIGHT_COLLAPSE_PERCENT
+  const topCollapseThreshold = INITIAL_TOP_HEIGHT * TOP_COLLAPSE_PERCENT
+  const bottomCollapseThreshold = Math.max(sideHeight - INITIAL_TOP_HEIGHT - SPLITTER_SIZE, 0) * BOTTOM_COLLAPSE_PERCENT
+  const isQueryEditorCollapsed = leftWidth < leftCollapseThreshold
+  const rightWidth = Math.max(gridWidth - leftWidth - SPLITTER_SIZE, 0)
+  const isRightPanelCollapsed = gridWidth > 0 && rightWidth < rightCollapseThreshold
+  const isDatasetsCollapsed = topHeight < topCollapseThreshold
+  const outputHeight = Math.max(sideHeight - topHeight - SPLITTER_SIZE, 0)
+  const isOutputCollapsed = sideHeight > 0 && outputHeight < bottomCollapseThreshold
 
   // Refs for dragging
   const dragRef = useRef<DragState>({
@@ -77,11 +92,46 @@ export default function App() {
   useEffect(() => {
     if (gridRef.current) {
       const width = gridRef.current.getBoundingClientRect().width
+      setGridWidth(width)
       setLeftWidth(Math.round(width * 0.6))
     }
     if (sideRef.current) {
       const height = sideRef.current.getBoundingClientRect().height
+      setSideHeight(height)
       setTopHeight(Math.round(height * 0.35))
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!gridRef.current && !sideRef.current) return undefined
+
+    const updateContainerSizes = () => {
+      if (gridRef.current) {
+        setGridWidth(gridRef.current.getBoundingClientRect().width)
+      }
+      if (sideRef.current) {
+        setSideHeight(sideRef.current.getBoundingClientRect().height)
+      }
+    }
+
+    updateContainerSizes()
+
+    const observers: ResizeObserver[] = []
+
+    if (gridRef.current) {
+      const gridObserver = new ResizeObserver(updateContainerSizes)
+      gridObserver.observe(gridRef.current)
+      observers.push(gridObserver)
+    }
+
+    if (sideRef.current) {
+      const sideObserver = new ResizeObserver(updateContainerSizes)
+      sideObserver.observe(sideRef.current)
+      observers.push(sideObserver)
+    }
+
+    return () => {
+      observers.forEach((observer) => observer.disconnect())
     }
   }, [])
 
@@ -317,6 +367,9 @@ export default function App() {
         gridRef={gridRef}
         sideRef={sideRef}
         isQueryEditorCollapsed={isQueryEditorCollapsed}
+        isRightPanelCollapsed={isRightPanelCollapsed}
+        isDatasetsCollapsed={isDatasetsCollapsed}
+        isOutputCollapsed={isOutputCollapsed}
       />
 
       <input
