@@ -47,13 +47,27 @@ class DBMSEngine:
         # si ya estan cargados, devolver
         if table_name in self._metadata_cache:
             return self._metadata_cache[table_name]
+        
         # sino cargamos del catalogo, preparamos la config y devolvemos
         esquema = self.catalog.get_table_schema(table_name)
         if not esquema:
              raise Exception(f"Error: La tabla '{table_name}' no existe en el catálogo.")
         
-        formato_binario = self._generar_formato_struct(esquema)
-        nombres_columnas = [col["nombre"] for col in esquema]
+        columnas_fisicas = []
+        for col in esquema:
+            if col["tipo"] == "POINT":
+                # Usa el Mapeo o el Default (_x, _y)
+                if col.get("mapped_by"):
+                    cx, cy = col["mapped_by"]
+                else:
+                    cx, cy = f"{col['nombre']}_x", f"{col['nombre']}_y"
+                columnas_fisicas.append({"nombre": cx, "tipo": "DOUBLE"})
+                columnas_fisicas.append({"nombre": cy, "tipo": "DOUBLE"})
+            else:
+                columnas_fisicas.append(col)
+        
+        formato_binario = self._generar_formato_struct(columnas_fisicas)
+        nombres_columnas = [col["nombre"] for col in columnas_fisicas]
 
         pk_col_name = next((c["nombre"] for c in esquema if c.get("primary_key")), "id")
         
@@ -65,14 +79,22 @@ class DBMSEngine:
         self._metadata_cache[table_name] = meta
         return meta
 
-    def _clean_tuple(self, data_tuple):
+    def _clean_tuple(self, data_tuple, esquema):
         cleaned = []
-        for val in data_tuple:
-            if isinstance(val, bytes):
-                # Decodifica de bytes a string y borra los nulls (\x00) de la derecha
-                cleaned.append(val.decode('utf-8', errors='ignore').rstrip('\x00'))
+        idx = 0
+        for col in esquema:
+            if col["tipo"] == "POINT":
+                x = data_tuple[idx]
+                y = data_tuple[idx+1]
+                cleaned.append(f"POINT({x}, {y})")
+                idx += 2 # Avanzamos 2 espacios  porque son 2 columnas físicas (x e y)
             else:
-                cleaned.append(val)
+                val = data_tuple[idx]
+                if isinstance(val, bytes):
+                    cleaned.append(val.decode('utf-8', errors='ignore').rstrip('\x00'))
+                else:
+                    cleaned.append(val)
+                idx += 1
         return tuple(cleaned)
 
 
@@ -117,8 +139,21 @@ class DBMSEngine:
         
         self.catalog.create_table(table_name, columns)
 
-        formato_binario = self._generar_formato_struct(columns)
-        nombres_columnas = [col["nombre"] for col in columns]
+        # manejo de tipo point como dos columnas físicas (x e y)
+        columnas_fisicas = []
+        for col in columns:
+            if col["tipo"] == "POINT":
+                if col.get("mapped_by"):
+                    cx, cy = col["mapped_by"]
+                else:
+                    cx, cy = f"{col['nombre']}_x", f"{col['nombre']}_y"
+                columnas_fisicas.append({"nombre": cx, "tipo": "DOUBLE"})
+                columnas_fisicas.append({"nombre": cy, "tipo": "DOUBLE"})
+            else:
+                columnas_fisicas.append(col)
+
+        formato_binario = self._generar_formato_struct(columnas_fisicas)
+        nombres_columnas = [col["nombre"] for col in columnas_fisicas]
         table_config = TableConfig(formato_binario, nombres_columnas, pk_col_name)
         esquema = self.catalog.get_table_schema(table_name)
         self._metadata_cache[table_name] = (esquema, table_config, pk_col_name)
@@ -229,7 +264,7 @@ class DBMSEngine:
                 
                 print(f"{result}")
                 if result.records:
-                     print(f"   -> Registro Encontrado: {self._clean_tuple(result.records.data_tuple)}")
+                     print(f"   -> Registro Encontrado: {self._clean_tuple(result.records.data_tuple, esquema)}")
                 else:
                      print("   -> 0 registros encontrados.")
 
@@ -246,7 +281,7 @@ class DBMSEngine:
                 print(f"{result}")
                 if result.records:
                     for r in result.records:
-                        print(f"   -> Registro: {self._clean_tuple(r.data_tuple)}")
+                        print(f"   -> Registro: {self._clean_tuple(r.data_tuple, esquema)}")
                 else:
                     print("   -> 0 registros encontrados.")
                     
@@ -290,7 +325,7 @@ class DBMSEngine:
                 print(f"Full Table Scan completado.")
                 print(f"   -> Registros que cumplen la condición ({len(resultados)}):")
                 for r in resultados:
-                    print(f"      * {self._clean_tuple(r.data_tuple)}")
+                    print(f"      * {self._clean_tuple(r.data_tuple, esquema)}")
             except Exception as e:
                 print(f"[ERROR] Fallo en el escaneo: {e}")
 

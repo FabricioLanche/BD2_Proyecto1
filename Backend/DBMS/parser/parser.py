@@ -40,8 +40,20 @@ class SQLParser:
             col_name = self.match('ID').value
             
             # tipo de Dato de columna
+            mapped_by = None
             if self.current().type == 'POINT_TYPE':
                 col_type = self.match('POINT_TYPE').value.upper()
+
+                if self.current().type == 'MAPPED':
+                    self.match('MAPPED')
+                    self.match('BY')
+                    self.match('OP') # (
+                    col_x = self.match('ID').value
+                    self.match('OP') # ,
+                    col_y = self.match('ID').value
+                    self.match('OP') # )
+                    mapped_by = (col_x, col_y)
+
             else:
                 col_type = self.match('TYPE').value.upper()
                 if col_type == 'VARCHAR':
@@ -65,7 +77,8 @@ class SQLParser:
                 "nombre": col_name, 
                 "tipo": col_type, 
                 "primary_key": is_primary,
-                "index_tech": index_tech
+                "index_tech": index_tech,
+                "mapped_by": mapped_by
             })
             
             if self.current().value == ')': break
