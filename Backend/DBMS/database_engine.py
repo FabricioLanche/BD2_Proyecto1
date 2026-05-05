@@ -315,3 +315,5 @@ class DatabaseEngine:
 
         elapsed = (time.perf_counter() - t0) * 1000
         return QueryResult(records, t.io_counter.snapshot(), elapsed, "RTREE KNN")
+    
+    

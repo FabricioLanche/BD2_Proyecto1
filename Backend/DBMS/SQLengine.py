@@ -333,6 +333,11 @@ class DBMSEngine:
         else:
             print(f"\n[ADVERTENCIA] La columna '{col_name}' no tiene un índice asignado")
 
+            if tipo_columna == "POINT":
+                print(f"\n[ERROR] La columna '{col_name}' es de tipo POINT y no tiene un índice RTREE.")
+                print("   -> El Full Table Scan espacial no está soportado :c.")
+                return
+
             if search_type == "SEARCH":
                 op = "="
                 val = ast["val"]
