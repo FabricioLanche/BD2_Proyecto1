@@ -69,13 +69,6 @@ class Record:
     def __repr__(self) -> str:
         return f"Record(PK={self.get_pk()}, Values={self.cleaned_values})"
 
-class Page:
-    def __init__(self, page_id, data):
-        self.page_id = page_id
-        self.next_page_ptr = -1
-        self.data = data
-
-        self.records = []
 class Header:
     def __init__(self, t_registros_fisicos, cantidad_auxiliar, primer_registro_logico):
         self.t_registros_fisicos = t_registros_fisicos
