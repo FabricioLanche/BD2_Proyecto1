@@ -235,29 +235,74 @@ class HeapFile:
         # Metadata se mantiene en RAM; se persiste en flush()
         return True
     
-    def load_from_csv(self, csv_path: str) -> List[Tuple[int, int]]:
-        rids = []
-
-        # Orden de columnas según column_map para garantizar consistencia con el formato de datos
+    def load_from_csv_optimized(self, csv_path: str) -> List[Tuple[Tuple[int, int], Tuple]]:
+        #Carga desde un archivo csv a un formato binario; retorna una lista de tuplas 
+        # (RID, data_tuple) para cada registro
+        results = []
+        
+        # Orden de columnas según column_map
         col_order = sorted(self.config.column_map.items(), key=lambda x: x[1])
         col_names = [name for name, _ in col_order]
+        
+        current_page_id = self.last_page_id + 1 if self.last_page_id > 0 else 1
+        current_page = bytearray(b'\x00' * self.pm.PAGE_SIZE)
+        current_record_count = 0
+        
+        record_size = self.config.get_data_size()
+        record_count = 0
+        
+        # PRE-COMPILAR conversiones (1 búsqueda por columna, no 100k)
+        conversions = [self.config.get_column_format(name) for name in col_names]
         
         with open(csv_path, newline='', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                # Construye la tupla en el orden correcto
+                # Conversión vectorizada con formatos pre-compilados
                 values = []
-                for col_name in col_names:
-                    col_fmt = self.config.get_column_format(col_name)
-                    raw     = row[col_name].strip()
+                for col_name, col_fmt in zip(col_names, conversions):
+                    raw = row[col_name].strip()
                     values.append(self._cast_value(raw, col_fmt))
                 
                 data_tuple = tuple(values)
-                record     = Record(data_tuple, self.config)
-                rid        = self.insert(record) # Se inserta en el heap file y se obtiene el RID
-                rids.append(rid)
+                record = Record(data_tuple, self.config)
+                record_bytes = record.to_bytes(self.config)
+                
+                if current_record_count >= self.records_per_page:
+                    self._write_page_header(current_page, current_record_count)
+                    self.pm.write_page(current_page_id, bytes(current_page))
+                    current_page_id += 1
+                    current_page = bytearray(b'\x00' * self.pm.PAGE_SIZE)
+                    current_record_count = 0
+                
+                offset = self._slot_offset(current_record_count)
+                current_page[offset:offset + record_size] = record_bytes
+                
+                rid = (current_page_id, current_record_count)
+                # Para las busquedas posteriores (sequential file) retorna tambien la tupla de datos 
+                results.append((rid, data_tuple))
+                
+                current_record_count += 1
+                record_count += 1
+                
+                if record_count % 10_000 == 0:
+                    print(f"    {record_count} registros cargados...")
         
-        return rids
+        if current_record_count > 0:
+            self._write_page_header(current_page, current_record_count)
+            self.pm.write_page(current_page_id, bytes(current_page))
+            self.last_page_id = current_page_id
+        else:
+            self.last_page_id = current_page_id - 1
+        
+        self.total_records = len(results)
+        self._persist_metadata()
+        
+        return results
+
+    def load_from_csv(self, csv_path: str) -> List[Tuple[int, int]]:
+        results = self.load_from_csv_optimized(csv_path)
+        # Retorna solo RIDs para compatibilidad
+        return [rid for rid, _ in results]
 
     def _cast_value(self, raw: str, fmt: str):
         fmt_clean = fmt.lstrip('<>=!')
