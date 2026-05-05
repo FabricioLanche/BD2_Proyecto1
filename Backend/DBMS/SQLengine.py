@@ -10,6 +10,10 @@ class DBMSEngine:
         print("Iniciando DBMS SQL...")
         self.catalog = SystemCatalog()
         self.storage = StorageEngine()
+
+        #Evitamos recalcular cargar el esquema, ConfigTable, etc.
+        self._metadata_cache = {}
+
         print("Catalog cargado exitosamente!")
 
     def execute_query(self, sql_string):
@@ -27,13 +31,6 @@ class DBMSEngine:
         except Exception as e:
             print(f"Error: {e}")
 
-    def _route_statement(self, ast):
-        action = ast["action"]
-        if action == "CREATE": self._execute_create(ast)
-        elif action == "INSERT": self._execute_insert(ast)
-        elif action == "SELECT": self._execute_select(ast)
-        elif action == "DELETE": self._execute_delete(ast)
- 
     def _generar_formato_struct(self, columns):
         formato = ""
         for col in columns:
@@ -45,7 +42,29 @@ class DBMSEngine:
                 size = tipo.split("(")[1].replace(")", "")
                 formato += f"{size}s"
         return formato
-    
+
+    def _get_table_metadata(self, table_name):
+        # si ya estan cargados, devolver
+        if table_name in self._metadata_cache:
+            return self._metadata_cache[table_name]
+        # sino cargamos del catalogo, preparamos la config y devolvemos
+        esquema = self.catalog.get_table_schema(table_name)
+        if not esquema:
+             raise Exception(f"Error: La tabla '{table_name}' no existe en el catálogo.")
+        
+        formato_binario = self._generar_formato_struct(esquema)
+        nombres_columnas = [col["nombre"] for col in esquema]
+
+        pk_col_name = next((c["nombre"] for c in esquema if c.get("primary_key")), "id")
+        
+        table_config = TableConfig(formato_binario, nombres_columnas, pk_col_name)
+        
+        self.storage.open_table(table_name, table_config, pk_col_name)
+
+        meta = (esquema, table_config, pk_col_name)
+        self._metadata_cache[table_name] = meta
+        return meta
+
     def _clean_tuple(self, data_tuple):
         cleaned = []
         for val in data_tuple:
@@ -56,6 +75,14 @@ class DBMSEngine:
                 cleaned.append(val)
         return tuple(cleaned)
 
+
+    def _route_statement(self, ast):
+        action = ast["action"]
+        if action == "CREATE": self._execute_create(ast)
+        elif action == "INSERT": self._execute_insert(ast)
+        elif action == "SELECT": self._execute_select(ast)
+        elif action == "DELETE": self._execute_delete(ast)
+ 
     # --- Lógica Semántica ---
     def _execute_create(self, ast):
         table_name = ast["table"]
@@ -92,7 +119,9 @@ class DBMSEngine:
 
         formato_binario = self._generar_formato_struct(columns)
         nombres_columnas = [col["nombre"] for col in columns]
-        table_config = TableConfig(formato_binario, nombres_columnas)
+        table_config = TableConfig(formato_binario, nombres_columnas, pk_col_name)
+        esquema = self.catalog.get_table_schema(table_name)
+        self._metadata_cache[table_name] = (esquema, table_config, pk_col_name)
 
         if filepath:
             print(f"\n[EXECUTE] Delegando carga masiva al Storage Engine...")
@@ -108,18 +137,11 @@ class DBMSEngine:
     def _execute_insert(self, ast):
         table_name = ast["table"]
         values = ast["values"]
-        
-        # Existencia de la tabla
-        esquema = self.catalog.get_table_schema(table_name)
+
+        esquema, table_config, pk_col_name = self._get_table_metadata(table_name)
+
         if len(values) != len(esquema):
             raise Exception(f"INSERT fallido: Se esperaban {len(esquema)} valores.")
-        
-        pk_col_name = "id"
-        for col in esquema:
-            if col.get("primary_key"):
-                pk_col_name = col["nombre"]
-                break
-
 
         # Type Checking
         for val, col in zip(values, esquema):
@@ -145,9 +167,6 @@ class DBMSEngine:
                     raise Exception(f"Type Error: La columna '{col_name}' espera un POINT con formato (x, y).")
                 if not all(isinstance(coord, (int, float)) for coord in val):
                     raise Exception(f"Type Error: Las coordenadas del POINT '{col_name}' deben ser numéricas.")
-
-        formato_binario = self._generar_formato_struct(esquema)
-
         
         valores_aplanados = []
         for val, col in zip(values, esquema):
@@ -166,15 +185,11 @@ class DBMSEngine:
         
         print(f"\n[EXECUTE] Preparando registro para '{table_name}'...")
 
-        nombres_columnas = [col["nombre"] for col in esquema]
-        table_config = TableConfig(formato_binario, nombres_columnas)
         record = Record(tuple(valores_aplanados), table_config)
 
         print(f"[EXECUTE] Delegando INSERT físico al Storage Engine...")
         
-        try:
-            self.storage.open_table(table_name, table_config, pk_col_name)
-            
+        try:            
             result = self.storage.insert(table_name, record)
             print(f"{result}")
             
@@ -189,25 +204,13 @@ class DBMSEngine:
         col_name = ast["col"]
         search_type = ast["type"]
 
-        esquema = self.catalog.get_table_schema(table_name)
+        esquema, table_config, pk_col_name = self._get_table_metadata(table_name)
         
-        if not esquema:
-             raise Exception(f"Error: La tabla '{table_name}' no existe en el catálogo.")
-             
         col_meta = next((c for c in esquema if c["nombre"] == col_name), None)
         if not col_meta:
             raise Exception(f"Error: La columna '{col_name}' no pertenece a '{table_name}'.")
 
-        formato_binario = self._generar_formato_struct(esquema)
-        nombres_columnas = [col["nombre"] for col in esquema]
-        table_config = TableConfig(formato_binario, nombres_columnas)
-
-        pk_col_name = next((c["nombre"] for c in esquema if c.get("primary_key")), "id")
-
-        self.storage.open_table(table_name, table_config, pk_col_name)
-
         # Query Optimizer (Seleccion de si usar indice o no y cual indice usar)
-
         es_llave_primaria = col_meta.get("primary_key")
         tipo_columna = col_meta.get("tipo")
         tech = col_meta.get("index_tech") 
@@ -294,5 +297,5 @@ class DBMSEngine:
 
     def _execute_delete(self, ast):
         table_name = ast["table"]
-        esquema = self.catalog.get_table_schema(table_name)
+        esquema, table_config, pk_col_name = self._get_table_metadata(table_name)
         print(f"\n[HOOK] -> Buscar registro en índices y marcar 'is_deleted = 1' en Sequential File.")

@@ -99,7 +99,7 @@ class SQLParser:
         curr = self.current()
         if curr.value == '=':
             self.match('OP')
-            val = self.match('NUM').value if self.current().type == 'NUM' else self.match('STRING').value.replace('"', '')
+            val = self.match('NUM').value if self.current().type == 'NUM' else self.match('STRING').value.strip("'\"")
             return {"action": "SELECT", "type": "SEARCH", "table": table, "col": col, "val": val}
         
         elif curr.type == 'BETWEEN':
@@ -156,7 +156,7 @@ class SQLParser:
                 values.append(val)
                 self.match('NUM')
             elif curr.type == 'STRING':
-                values.append(curr.value.replace('"', ''))
+                values.append(curr.value.strip("'\""))
                 self.match('STRING')
             elif curr.type == 'POINT_TYPE':
                 self.match('POINT_TYPE')
@@ -184,5 +184,5 @@ class SQLParser:
         if self.current().type == 'NUM':
             val = self.match('NUM').value
         else:
-            val = self.match('STRING').value.replace('"', '')
+            val = self.match('STRING').value.strip("'\"")
         return {"action": "DELETE", "table": table, "col": col, "val": val}

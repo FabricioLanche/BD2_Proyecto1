@@ -33,6 +33,7 @@ def limpiar_archivos(tabla: str):
 CONFIG = TableConfig(
     data_format  = '<i30sf',
     column_names = ['id', 'nombre', 'salario'],
+    pk_col_name = 'id'
 )
 COLUMNAS = ['id', 'nombre', 'salario']
 DATOS_BASE = [
