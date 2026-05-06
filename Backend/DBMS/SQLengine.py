@@ -55,7 +55,10 @@ class DBMSEngine:
         
         spatial_meta = None
         columnas_fisicas = []
+        hash_meta = []
         for col in esquema:
+            if col.get("index_tech") == "HASH":
+                hash_meta.append({"nombre": col["nombre"], "tipo": col["tipo"]})
             if col["tipo"] == "POINT":
                 # Usa el Mapeo o el Default (_x, _y)
                 if col.get("mapped_by"):
@@ -77,7 +80,7 @@ class DBMSEngine:
         
         table_config = TableConfig(formato_binario, nombres_columnas, pk_col_name)
         
-        self.storage.open_table(table_name, table_config, pk_col_name, spatial_meta)
+        self.storage.open_table(table_name, table_config, pk_col_name, spatial_meta, hash_meta)
 
         meta = (esquema, table_config, pk_col_name)
         self._metadata_cache[table_name] = meta
@@ -117,6 +120,7 @@ class DBMSEngine:
         
         pk_col_name = "id"
         pk_count = 0
+        hash_meta = []
         for col in columns:
             if col.get("primary_key"):
                 pk_count += 1
@@ -124,6 +128,9 @@ class DBMSEngine:
                 
             tech = col.get("index_tech")
             tipo = col.get("tipo")
+
+            if col.get("primary_key") and tech and tech != "SEQUENTIAL":
+                raise Exception(f"Error Semántico: La PRIMARY KEY solo soporta el índice SEQUENTIAL. La técnica '{tech}' no está soportada para la llave primaria.")
             
             if tech:
                 if tech == "SEQUENTIAL":
@@ -131,6 +138,10 @@ class DBMSEngine:
                         raise Exception(f"Error Semántico: El índice SEQUENTIAL solo está soportado para la PRIMARY KEY. La columna '{col['nombre']}' no es PK.")
                     if tipo not in ["INT", "DOUBLE"]:
                         raise Exception(f"Error Semántico: SEQUENTIAL solo soporta columnas numéricas. La columna '{col['nombre']}' es {tipo}.")
+                elif tech == "HASH":
+                    if tipo == "POINT":
+                        raise Exception(f"Error Semántico: La técnica HASH no es compatible con el tipo POINT. Use RTREE para columnas espaciales.")
+                    hash_meta.append(col)
                 elif tech == "RTREE" and tipo != "POINT":
                         raise Exception(f"Error Semántico: RTREE es un índice espacial y solo soporta el tipo POINT. La columna '{col['nombre']}' es {tipo}.")
                 if tipo == "POINT" and tech != "RTREE":
@@ -170,11 +181,11 @@ class DBMSEngine:
 
         if filepath:
             print(f"\n[EXECUTE] Delegando carga masiva al Storage Engine...")
-            result = self.storage.create_table_from_csv(table_name, table_config, filepath, pk_col_name, spatial_meta)
+            result = self.storage.create_table_from_csv(table_name, table_config, filepath, pk_col_name, spatial_meta, hash_meta)
             print(f"{result}")
         else:
              print(f"\n[EXECUTE] Delegando creación física al Storage Engine...")
-             self.storage.open_table(table_name, table_config, pk_col_name, spatial_meta)
+             self.storage.open_table(table_name, table_config, pk_col_name, spatial_meta, hash_meta)
              print(f" [CREATE] tabla '{table_name}' creada.")
 
 
@@ -299,14 +310,25 @@ class DBMSEngine:
         elif tech == "BTREE":
             print(f"\n[HOOK] Ejecutando Index Scan usando B-Tree para la columna '{col_name}'.")
             
-
-
         
         elif tech == "HASH":
-            if search_type == "RANGE":
-                print(f"\n[ERROR] El índice Extendible Hash no soporta búsquedas por rango (RANGE). Se requiere Full Table Scan.")
+            if search_type == "SEARCH":
+                val = ast["val"]
+                if tipo_columna == "INT": 
+                    val = int(val)
+                elif tipo_columna == "DOUBLE": 
+                    val = float(val)
+                elif isinstance(val, str): 
+                    val = val.strip("'\"")
+
+                print(f"\n[EXECUTE] Index Scan: Usando Hashing Extendible en '{col_name}'...")
+                result = self.storage.search_hash(table_name, col_name, val)
+                if result.records:
+                     print(f"   -> Registro Encontrado: {self._clean_tuple(result.records.data_tuple, esquema)}")
+                else:
+                     print("   -> 0 registros encontrados.")
             else:
-                print(f"\n[HOOK] Ejecutando Index Scan usando Extendible Hash para la columna '{col_name}'.")
+                print(f"\n[ERROR] El tipo de búsqueda '{search_type}' no está soportado por el índice HASH. Solo se permiten búsquedas exactas (=).")
                 
         elif tech == "RTREE":
             print(f"\n[HOOK] Ejecutando Spatial Index Scan usando R-Tree para la columna '{col_name}'.")

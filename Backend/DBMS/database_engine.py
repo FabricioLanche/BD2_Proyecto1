@@ -7,13 +7,8 @@ from DBMS.organization.page_manager import PageManager, IOCounter
 
 
 from DBMS.indexes.rtree import Rtree
-from DBMS.organization.data_structures import TableConfig, Record
-from DBMS.organization.heap_file import HeapFile
-from DBMS.organization.sequential_file import SequentialIndex
-from DBMS.organization.page_manager import PageManager, IOCounter
+from DBMS.indexes.extendible_hashing import ExtendibleHashing
 
-
-from DBMS.indexes.rtree import Rtree
 
 class QueryResult:
     def __init__(self, records, io_stats: dict, elapsed_ms: float, operation: str):
@@ -45,6 +40,7 @@ class _TableEntry:
         config: TableConfig,
         pk_col: str,
         spatial_meta: dict,
+        hash_meta:list,
     ):
         self.heap       = heap
         self.index      = index
@@ -57,6 +53,8 @@ class _TableEntry:
         self.rtree = None
         self.spatial_meta = spatial_meta
         self.rtree = None
+        self.hash_meta = hash_meta or []
+        self.hash_indices = {}
 
 
 
@@ -72,6 +70,7 @@ class DatabaseEngine:
         csv_path: str,
         pk_col: str,
         spatial_meta: dict,
+        hash_meta: list,
     ) -> QueryResult:
         # Crea la tabla, carga el CSV en el HeapFile y construye el índice
         # Para las cargas masivas se deshabilita reconstrucciones y se hace batch indexing
@@ -108,8 +107,23 @@ class DatabaseEngine:
         results = heap.load_from_csv_optimized(csv_path)
         print(f"  ✓ {len(results)} registros en heap")
 
-        entry = _TableEntry(heap, index, heap_pm, index_pm, io_counter, config, pk_col, spatial_meta)
+        entry = _TableEntry(heap, index, heap_pm, index_pm, io_counter, config, pk_col, spatial_meta, hash_meta)
         
+        for meta in hash_meta:
+            col_name = meta["nombre"]
+            hash_pm = PageManager(f"{table_name}_{col_name}.hash", io_counter)
+
+            # el Extendible Hashing esperaba el pk mediante el Tableconfig así que voy 
+            # a engañarle para que use el de la columna que esta indexando
+            original_pk_index = config.pk_index
+            config.pk_index = config.column_map[col_name]
+
+            entry.hash_indices[col_name] = ExtendibleHashing(hash_pm, config)
+
+            config.pk_index = original_pk_index
+            #TODO: quitar el engaño de pk y en su lugar modificar el Extendible Hashing
+
+
         idx_x, idx_y = -1, -1
         if spatial_meta:
             rtree_filename = f"{table_name}_spatial.bin"
@@ -126,14 +140,15 @@ class DatabaseEngine:
             pk = data_tuple[0]
             index.add(pk, rid)
 
+            for col_name, h_index in entry.hash_indices.items():
+                col_idx = config.column_map[col_name]
+                val = data_tuple[col_idx]
+                h_index.add(val, rid)
+
             if entry.rtree:
                 point = (data_tuple[idx_x], data_tuple[idx_y])
                 entry.rtree.insert(point, rid)
 
-
-            if entry.rtree:
-                point = (data_tuple[idx_x], data_tuple[idx_y])
-                entry.rtree.insert(point, rid)
 
             if (i + 1) % 10_000 == 0:
                 elapsed_partial = (time.perf_counter() - t0) * 1000
@@ -156,8 +171,6 @@ class DatabaseEngine:
 
         elapsed = (time.perf_counter() - t0) * 1000
 
-        #entry = _TableEntry(heap, index, heap_pm, index_pm, io_counter, config, pk_col)
-        #entry = _TableEntry(heap, index, heap_pm, index_pm, io_counter, config, pk_col)
         self._tables[table_name] = entry
 
         result = QueryResult([], io_counter.snapshot(), elapsed, "CREATE+LOAD")
@@ -168,6 +181,9 @@ class DatabaseEngine:
         heap.flush_metadata()
         index.flush_metadata()
 
+        for h_index in entry.hash_indices.values():
+            h_index.flush_metadata()
+
         return result
 
     def open_table(
@@ -176,6 +192,7 @@ class DatabaseEngine:
         config: TableConfig,
         pk_col: str,
         spatial_meta: dict = None,
+        hash_meta: list = None,
     ) -> None:
         # Abre una tabla que ya existe en disco (sin cargar CSV).
 
@@ -193,10 +210,21 @@ class DatabaseEngine:
         heap  = HeapFile(heap_filename,  config, heap_pm)
         index = SequentialIndex(index_filename, index_pm, config.get_pk_format())
 
+
+
         self._tables[table_name] = _TableEntry(
-            heap, index, heap_pm, index_pm, io_counter, config, pk_col, spatial_meta
-        )
-        
+            heap, index, heap_pm, index_pm, io_counter, config, pk_col, spatial_meta, hash_meta)
+
+        self._tables[table_name].hash_indices = {}
+
+
+        if hash_meta:
+            for meta in hash_meta:
+                col_name = meta["nombre"]
+                hash_filename = f"{table_name}_{col_name}.hash"
+                h_pm = PageManager(hash_filename, io_counter)
+                self._tables[table_name].hash_indices[col_name] = ExtendibleHashing(h_pm, config)
+
         if spatial_meta:
             rtree_filename = f"{table_name}_spatial.bin"
             self._tables[table_name].rtree = Rtree(rtree_filename)
@@ -211,11 +239,9 @@ class DatabaseEngine:
         rid = t.heap.insert(record)
         t.index.add(record.get_pk(), rid)
 
-        if t.rtree:
-            idx_x = t.config.column_map[t.spatial_meta["col_x"]]
-            idx_y = t.config.column_map[t.spatial_meta["col_y"]]
-            point = (record.data_tuple[idx_x], record.data_tuple[idx_y])
-            t.rtree.insert(point, rid)
+        for col_name, h_index in t.hash_indices.items():
+            val = record.get_attribute(col_name)
+            h_index.add(val, rid)
 
         if t.rtree:
             idx_x = t.config.column_map[t.spatial_meta["col_x"]]
@@ -302,6 +328,9 @@ class DatabaseEngine:
         t.heap.flush_metadata()
         t.index.flush_metadata()
 
+        for h_index in t.hash_indices.values():
+            h_index.flush_metadata()
+
     def flush_all(self) -> None:
         for table_name in self._tables:
             self.flush_table(table_name)
@@ -337,4 +366,14 @@ class DatabaseEngine:
         elapsed = (time.perf_counter() - t0) * 1000
         return QueryResult(records, t.io_counter.snapshot(), elapsed, "RTREE KNN")
     
-    
+    def search_hash(self, table_name: str, col_name: str, val) -> QueryResult:
+        t = self._get_table(table_name)
+        t0 = time.perf_counter()
+        self._reset_io(t)
+
+        h_index = t.hash_indices[col_name]
+        rid = h_index.search_rid(val)
+        record = t.heap.search(rid) if rid else None
+
+        elapsed = (time.perf_counter() - t0) * 1000
+        return QueryResult(record, t.io_counter.snapshot(), elapsed, "HASH SEARCH")    
