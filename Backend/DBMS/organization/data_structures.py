@@ -5,7 +5,6 @@ from typing import Tuple, Any, Optional
 class TableConfig:
     # Representar qué forma tienen los datos que el usuario insertó.
     def __init__(self, data_format: str, column_names, pk_col_name: str = "id"):
-    def __init__(self, data_format: str, column_names, pk_col_name: str = "id"):
         self.data_format = data_format
         self.data_size = struct.calcsize(self.data_format)
         self.pk_index = 0

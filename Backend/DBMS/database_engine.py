@@ -45,7 +45,6 @@ class _TableEntry:
         config: TableConfig,
         pk_col: str,
         spatial_meta: dict,
-        spatial_meta: dict,
     ):
         self.heap       = heap
         self.index      = index
@@ -72,7 +71,6 @@ class DatabaseEngine:
         config: TableConfig,
         csv_path: str,
         pk_col: str,
-        spatial_meta: dict,
         spatial_meta: dict,
     ) -> QueryResult:
         # Crea la tabla, carga el CSV en el HeapFile y construye el índice
@@ -178,7 +176,6 @@ class DatabaseEngine:
         config: TableConfig,
         pk_col: str,
         spatial_meta: dict = None,
-        spatial_meta: dict = None,
     ) -> None:
         # Abre una tabla que ya existe en disco (sin cargar CSV).
 
@@ -197,7 +194,6 @@ class DatabaseEngine:
         index = SequentialIndex(index_filename, index_pm, config.get_pk_format())
 
         self._tables[table_name] = _TableEntry(
-            heap, index, heap_pm, index_pm, io_counter, config, pk_col, spatial_meta
             heap, index, heap_pm, index_pm, io_counter, config, pk_col, spatial_meta
         )
         
