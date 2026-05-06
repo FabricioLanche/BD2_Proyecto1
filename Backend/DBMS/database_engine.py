@@ -7,6 +7,13 @@ from DBMS.organization.page_manager import PageManager, IOCounter
 
 
 from DBMS.indexes.rtree import Rtree
+from DBMS.organization.data_structures import TableConfig, Record
+from DBMS.organization.heap_file import HeapFile
+from DBMS.organization.sequential_file import SequentialIndex
+from DBMS.organization.page_manager import PageManager, IOCounter
+
+
+from DBMS.indexes.rtree import Rtree
 
 class QueryResult:
     def __init__(self, records, io_stats: dict, elapsed_ms: float, operation: str):
@@ -38,6 +45,7 @@ class _TableEntry:
         config: TableConfig,
         pk_col: str,
         spatial_meta: dict,
+        spatial_meta: dict,
     ):
         self.heap       = heap
         self.index      = index
@@ -46,6 +54,8 @@ class _TableEntry:
         self.io_counter = io_counter
         self.config     = config
         self.pk_col     = pk_col
+        self.spatial_meta = spatial_meta
+        self.rtree = None
         self.spatial_meta = spatial_meta
         self.rtree = None
 
@@ -62,6 +72,7 @@ class DatabaseEngine:
         config: TableConfig,
         csv_path: str,
         pk_col: str,
+        spatial_meta: dict,
         spatial_meta: dict,
     ) -> QueryResult:
         # Crea la tabla, carga el CSV en el HeapFile y construye el índice
@@ -121,6 +132,11 @@ class DatabaseEngine:
                 point = (data_tuple[idx_x], data_tuple[idx_y])
                 entry.rtree.insert(point, rid)
 
+
+            if entry.rtree:
+                point = (data_tuple[idx_x], data_tuple[idx_y])
+                entry.rtree.insert(point, rid)
+
             if (i + 1) % 10_000 == 0:
                 elapsed_partial = (time.perf_counter() - t0) * 1000
                 print(f"    {i + 1}/{len(results)} indexados ({elapsed_partial:.1f}ms)")
@@ -143,6 +159,7 @@ class DatabaseEngine:
         elapsed = (time.perf_counter() - t0) * 1000
 
         #entry = _TableEntry(heap, index, heap_pm, index_pm, io_counter, config, pk_col)
+        #entry = _TableEntry(heap, index, heap_pm, index_pm, io_counter, config, pk_col)
         self._tables[table_name] = entry
 
         result = QueryResult([], io_counter.snapshot(), elapsed, "CREATE+LOAD")
@@ -160,6 +177,7 @@ class DatabaseEngine:
         table_name: str,
         config: TableConfig,
         pk_col: str,
+        spatial_meta: dict = None,
         spatial_meta: dict = None,
     ) -> None:
         # Abre una tabla que ya existe en disco (sin cargar CSV).
@@ -180,6 +198,7 @@ class DatabaseEngine:
 
         self._tables[table_name] = _TableEntry(
             heap, index, heap_pm, index_pm, io_counter, config, pk_col, spatial_meta
+            heap, index, heap_pm, index_pm, io_counter, config, pk_col, spatial_meta
         )
         
         if spatial_meta:
@@ -195,6 +214,12 @@ class DatabaseEngine:
 
         rid = t.heap.insert(record)
         t.index.add(record.get_pk(), rid)
+
+        if t.rtree:
+            idx_x = t.config.column_map[t.spatial_meta["col_x"]]
+            idx_y = t.config.column_map[t.spatial_meta["col_y"]]
+            point = (record.data_tuple[idx_x], record.data_tuple[idx_y])
+            t.rtree.insert(point, rid)
 
         if t.rtree:
             idx_x = t.config.column_map[t.spatial_meta["col_x"]]
