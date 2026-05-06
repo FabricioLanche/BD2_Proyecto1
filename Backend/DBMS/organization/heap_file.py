@@ -1,6 +1,7 @@
 import struct
 import csv
 import operator
+import re
 from typing import List, Tuple, Optional, Any
 from .page_manager import PageManager
 from .data_structures import TableConfig, Record
@@ -145,22 +146,7 @@ class HeapFile:
         return records
 
     def filter_records(self, column_name: str, operator_str: str, value: Any) -> List[Record]:
-        # Recolectar RIDs eliminados para ignorarlos en el scan lineal
-        deleted_rids = set()
-        curr_rid = self.first_free_rid
-        while curr_rid != (-1, -1):
-            deleted_rids.add(curr_rid)
-            page_id, slot_id = curr_rid
-            try:
-                page = self.pm.read_page(page_id)
-                slot_offset = self._slot_offset(slot_id)
-                if len(page) >= slot_offset + 8:
-                    next_page, next_slot = struct.unpack('<ii', page[slot_offset:slot_offset+8])
-                    curr_rid = (next_page, next_slot)
-                else:
-                    break
-            except Exception:
-                break
+        deleted_rids = self._get_deleted_rids()
         
         operator_str = operator_str.upper() if isinstance(operator_str, str) else operator_str
         
@@ -211,7 +197,32 @@ class HeapFile:
                     results.append(record)
                     
         return results
-    
+
+
+    def exists_pk(self, value: Any) -> Optional[Tuple[int, int]]:
+        # Busca si existe un registro cuya PK sea igual a `value`.
+        search_value = value.strip() if isinstance(value, str) else value
+        deleted_rids  = self._get_deleted_rids()
+
+        for page_id in range(1, self.last_page_id + 1):
+            try:
+                page = self.pm.read_page(page_id)
+            except Exception:
+                continue
+
+            record_count = self._read_page_header(page)
+            for slot_id in range(record_count):
+                if (page_id, slot_id) in deleted_rids:
+                    continue
+
+                record_val = self._read_pk_from_slot(page, slot_id)
+                if isinstance(record_val, str):
+                    record_val = record_val.strip()
+
+                if record_val == search_value:
+                    return (page_id, slot_id)
+
+        return None
     def delete(self, rid: Tuple[int, int]) -> bool:
         page_id, slot_id = rid
         page = bytearray(self.pm.read_page(page_id))
@@ -223,16 +234,13 @@ class HeapFile:
         # Guarda el RID actual del first_free_rid en los primeros 8 bytes
         next_rid_bytes = struct.pack('<ii', self.first_free_rid[0], self.first_free_rid[1])
         
-        # Rellena el slot con el siguiente RID disponible
         slot_offset = self._slot_offset(slot_id)
         page[slot_offset:slot_offset + 8] = next_rid_bytes
         
-        # Actualiza el header de la lista enlazada de huecos
         self.first_free_rid = (page_id, slot_id)
         
         self.pm.write_page(page_id, bytes(page))
         self.total_records = max(0, self.total_records - 1)
-        # Metadata se mantiene en RAM; se persiste en flush()
         return True
     
     def load_from_csv_optimized(self, csv_path: str) -> List[Tuple[Tuple[int, int], Tuple]]:
@@ -251,7 +259,6 @@ class HeapFile:
         record_size = self.config.get_data_size()
         record_count = 0
         
-        # PRE-COMPILAR conversiones (1 búsqueda por columna, no 100k)
         conversions = [self.config.get_column_format(name) for name in col_names]
         
         with open(csv_path, newline='', encoding='utf-8') as f:
@@ -301,7 +308,6 @@ class HeapFile:
 
     def load_from_csv(self, csv_path: str) -> List[Tuple[int, int]]:
         results = self.load_from_csv_optimized(csv_path)
-        # Retorna solo RIDs para compatibilidad
         return [rid for rid, _ in results]
 
     def _cast_value(self, raw: str, fmt: str):
@@ -315,14 +321,12 @@ class HeapFile:
             return raw.encode('utf-8')[:size].ljust(size, b'\x00')
         return raw
     
-    # ============ Métodos internos (helpers) ============
+    # helpers
     
     def _slot_offset(self, slot_id: int) -> int:
-        # Calcula el offset para un slot 
         return self._PAGE_HEADER_SIZE + (slot_id * self.config.get_data_size())
     
     def _read_page_header(self, page: bytes) -> int:
-        #Lee el conteo de registros activos de una página
         return struct.unpack(self._PAGE_HEADER_FORMAT, page[:self._PAGE_HEADER_SIZE])[0]
     
     def _write_page_header(self, page: bytearray, record_count: int) -> None:
@@ -331,7 +335,6 @@ class HeapFile:
         page[:self._PAGE_HEADER_SIZE] = header
     
     def _read_record_from_slot(self, page: bytes, slot_id: int) -> bytes:
-        # Lee los bytes de un registro
         offset = self._slot_offset(slot_id)
         size = self.config.get_data_size()
         return page[offset:offset + size]
@@ -339,3 +342,52 @@ class HeapFile:
     def _write_record_to_slot(self, page: bytearray, slot_id: int, record_bytes: bytes) -> None:
         offset = self._slot_offset(slot_id)
         page[offset:offset + len(record_bytes)] = record_bytes
+
+    def _read_pk_from_slot(self, page: bytes, slot_id: int) -> Any:        
+        fmt_body = self.config.data_format.lstrip('<>=!')
+        endian   = self.config.data_format[0] if self.config.data_format[0] in '<>=!' else '<'
+        tokens   = re.findall(r'\d*[a-zA-Z]', fmt_body)
+
+        pk_byte_offset = sum(
+            struct.calcsize(endian + tok)
+            for tok in tokens[:self.config.pk_index]
+        )
+        pk_fmt = endian + tokens[self.config.pk_index]
+        pk_size = struct.calcsize(pk_fmt)
+
+        slot_start = self._slot_offset(slot_id)
+        raw = page[slot_start + pk_byte_offset : slot_start + pk_byte_offset + pk_size]
+        value = struct.unpack(pk_fmt, raw)[0]
+
+        if isinstance(value, bytes):
+            return value.decode('utf-8', errors='ignore').rstrip('\x00')
+        return value
+    
+    def _get_deleted_rids(self) -> set:
+        # Recorre la lista libre y retorna el conjunto de RIDs eliminados
+        deleted_rids: set = set()
+        curr_rid = self.first_free_rid
+        visited: set = set()
+
+        while curr_rid != (-1, -1):
+            if curr_rid in visited:
+                # Ciclo detectado: free-list corrupta, detenemos
+                break
+            visited.add(curr_rid)
+            deleted_rids.add(curr_rid)
+
+            page_id, slot_id = curr_rid
+            try:
+                page = self.pm.read_page(page_id)
+                slot_offset = self._slot_offset(slot_id)
+                if len(page) >= slot_offset + 8:
+                    next_page, next_slot = struct.unpack('<ii', page[slot_offset:slot_offset + 8])
+                    curr_rid = (next_page, next_slot)
+                else:
+                    break
+            except Exception:
+                break
+
+        return deleted_rids
+
+

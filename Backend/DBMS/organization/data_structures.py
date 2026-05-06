@@ -4,11 +4,17 @@ from typing import Tuple, Any, Optional
 
 class TableConfig:
     # Representar qué forma tienen los datos que el usuario insertó.
-    def __init__(self, data_format: str, column_names):
+    def __init__(self, data_format: str, column_names, pk_col_name: str = "id"):
         self.data_format = data_format
         self.data_size = struct.calcsize(self.data_format)
+        self.pk_index = 0
+        self.pk_col_name = pk_col_name
+
         # Mapeo: dónde está cada atributo en la tupla
         self.column_map = {name: idx for idx, name in enumerate(column_names)}
+
+        if pk_col_name in self.column_map:
+            self.pk_index = self.column_map[pk_col_name]
         
     def get_data_size(self) -> int:
         return self.data_size
@@ -21,7 +27,7 @@ class TableConfig:
 
     def get_pk_format(self) -> str:
         # La PK es índice 0 — busca el nombre con idx=0
-        pk_name = next(name for name, idx in self.column_map.items() if idx == 0)
+        pk_name = next(name for name, idx in self.column_map.items() if idx == self.pk_index)
         return self.get_column_format(pk_name)
 
 class Record:
@@ -45,13 +51,12 @@ class Record:
     
     def get_pk(self):
         # Asumimos que la PK esta en la posicion 0
-        return self.data_tuple[0]
+        return self.data_tuple[self.config.pk_index]
         
     def get_attribute(self, column_name):
         idx = self.config.column_map[column_name]
         valor = self.data_tuple[idx]
         
-        # Opcional: Limpiar strings de bytes nulos (\x00) que deja struct
         if isinstance(valor, bytes):
             return valor.decode('utf-8').rstrip('\x00')
         return valor

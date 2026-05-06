@@ -2,10 +2,9 @@
 import os
 
 class PageManager:
-    PAGE_SIZE = 4096  # Tamaño estándar de 4 KB solicitado
-
-    def __init__(self, db_filename, io_counter=None):
+    def __init__(self, db_filename, io_counter=None, page_size=4096):
         self.db_filename = db_filename
+        self.PAGE_SIZE = page_size  # Tamaño de página configurable
         self.read_count = 0
         self.write_count = 0
         #Contador global de I/O compartido
@@ -73,7 +72,7 @@ class PageManager:
         # VALIDACIÓN CRÍTICA: el archivo debe ser múltiplo de PAGE_SIZE
         if file_size % self.PAGE_SIZE != 0:
             raise ValueError(
-                f"❌ Archivo corrupto: tamaño {file_size} bytes "
+                f"Archivo corrupto: tamaño {file_size} bytes "
                 f"no es múltiplo de PAGE_SIZE ({self.PAGE_SIZE})"
             )
         

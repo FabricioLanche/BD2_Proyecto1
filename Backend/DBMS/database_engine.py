@@ -1,9 +1,12 @@
 import time
 from typing import Dict
-from organization.data_structures import TableConfig, Record
-from organization.heap_file import HeapFile
-from organization.sequential_file import SequentialIndex
-from organization.page_manager import PageManager, IOCounter
+from DBMS.organization.data_structures import TableConfig, Record
+from DBMS.organization.heap_file import HeapFile
+from DBMS.organization.sequential_file import SequentialIndex
+from DBMS.organization.page_manager import PageManager, IOCounter
+
+
+from DBMS.indexes.rtree import Rtree
 
 class QueryResult:
     def __init__(self, records, io_stats: dict, elapsed_ms: float, operation: str):
@@ -34,6 +37,7 @@ class _TableEntry:
         io_counter: IOCounter,
         config: TableConfig,
         pk_col: str,
+        spatial_meta: dict,
     ):
         self.heap       = heap
         self.index      = index
@@ -42,6 +46,8 @@ class _TableEntry:
         self.io_counter = io_counter
         self.config     = config
         self.pk_col     = pk_col
+        self.spatial_meta = spatial_meta
+        self.rtree = None
 
 
 
@@ -56,6 +62,7 @@ class DatabaseEngine:
         config: TableConfig,
         csv_path: str,
         pk_col: str,
+        spatial_meta: dict,
     ) -> QueryResult:
         # Crea la tabla, carga el CSV en el HeapFile y construye el índice
         # Para las cargas masivas se deshabilita reconstrucciones y se hace batch indexing
@@ -92,11 +99,28 @@ class DatabaseEngine:
         results = heap.load_from_csv_optimized(csv_path)
         print(f"  ✓ {len(results)} registros en heap")
 
+        entry = _TableEntry(heap, index, heap_pm, index_pm, io_counter, config, pk_col, spatial_meta)
+        
+        idx_x, idx_y = -1, -1
+        if spatial_meta:
+            rtree_filename = f"{table_name}_spatial.bin"
+            entry.rtree = Rtree(rtree_filename, io_counter)
+            
+            # Buscamos en qué posición (índice) de la tupla vienen la X y la Y
+            idx_x = config.column_map[spatial_meta["col_x"]]
+            idx_y = config.column_map[spatial_meta["col_y"]]
+
+
         # 2. Indexar utilizando el return anterior -> se evita llamar heap.search()
         print(f"  Indexando {len(results)} registros...")
         for i, (rid, data_tuple) in enumerate(results):
             pk = data_tuple[0]
             index.add(pk, rid)
+
+            if entry.rtree:
+                point = (data_tuple[idx_x], data_tuple[idx_y])
+                entry.rtree.insert(point, rid)
+
             if (i + 1) % 10_000 == 0:
                 elapsed_partial = (time.perf_counter() - t0) * 1000
                 print(f"    {i + 1}/{len(results)} indexados ({elapsed_partial:.1f}ms)")
@@ -118,7 +142,7 @@ class DatabaseEngine:
 
         elapsed = (time.perf_counter() - t0) * 1000
 
-        entry = _TableEntry(heap, index, heap_pm, index_pm, io_counter, config, pk_col)
+        #entry = _TableEntry(heap, index, heap_pm, index_pm, io_counter, config, pk_col)
         self._tables[table_name] = entry
 
         result = QueryResult([], io_counter.snapshot(), elapsed, "CREATE+LOAD")
@@ -136,6 +160,7 @@ class DatabaseEngine:
         table_name: str,
         config: TableConfig,
         pk_col: str,
+        spatial_meta: dict = None,
     ) -> None:
         # Abre una tabla que ya existe en disco (sin cargar CSV).
 
@@ -154,8 +179,12 @@ class DatabaseEngine:
         index = SequentialIndex(index_filename, index_pm, config.get_pk_format())
 
         self._tables[table_name] = _TableEntry(
-            heap, index, heap_pm, index_pm, io_counter, config, pk_col
+            heap, index, heap_pm, index_pm, io_counter, config, pk_col, spatial_meta
         )
+        
+        if spatial_meta:
+            rtree_filename = f"{table_name}_spatial.bin"
+            self._tables[table_name].rtree = Rtree(rtree_filename, io_counter)
 
     # Operaciones principales
 
@@ -166,6 +195,12 @@ class DatabaseEngine:
 
         rid = t.heap.insert(record)
         t.index.add(record.get_pk(), rid)
+
+        if t.rtree:
+            idx_x = t.config.column_map[t.spatial_meta["col_x"]]
+            idx_y = t.config.column_map[t.spatial_meta["col_y"]]
+            point = (record.data_tuple[idx_x], record.data_tuple[idx_y])
+            t.rtree.insert(point, rid)
 
         elapsed = (time.perf_counter() - t0) * 1000
         return QueryResult(rid, t.io_counter.snapshot(), elapsed, "INSERT")
@@ -249,3 +284,35 @@ class DatabaseEngine:
     def flush_all(self) -> None:
         for table_name in self._tables:
             self.flush_table(table_name)
+
+
+    def search_spatial_radius(self, table_name: str, x: float, y: float, radius: float) -> QueryResult:
+        t = self._get_table(table_name)
+        t0 = time.perf_counter()
+        self._reset_io(t)
+
+        # Retorna: [ ((x,y), (page, slot)), ... ]
+        rtree_results = t.rtree.rangeSearch((x, y), radius)
+        
+        # Extraemos el RID (el índice 1 de la tupla devuelta)
+        rids = [res[1] for res in rtree_results]
+        
+        # traemos datos crudos desde el disco
+        records = t.heap.get_batch(rids) if rids else []
+
+        elapsed = (time.perf_counter() - t0) * 1000
+        return QueryResult(records, t.io_counter.snapshot(), elapsed, "RTREE RADIUS")
+
+    def search_spatial_knn(self, table_name: str, x: float, y: float, k: int) -> QueryResult:
+        t = self._get_table(table_name)
+        t0 = time.perf_counter()
+        self._reset_io(t)
+
+        rtree_results = t.rtree.knnSearch((x, y), k)
+        
+        rids = [res[1] for res in rtree_results]
+        records = t.heap.get_batch(rids) if rids else []
+
+        elapsed = (time.perf_counter() - t0) * 1000
+        return QueryResult(records, t.io_counter.snapshot(), elapsed, "RTREE KNN")
+    
