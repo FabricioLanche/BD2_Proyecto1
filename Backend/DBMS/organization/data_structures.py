@@ -66,9 +66,3 @@ class Record:
     
     def __repr__(self) -> str:
         return f"Record(PK={self.get_pk()}, Values={self.cleaned_values})"
-
-class Header:
-    def __init__(self, t_registros_fisicos, cantidad_auxiliar, primer_registro_logico):
-        self.t_registros_fisicos = t_registros_fisicos
-        self.cantidad_auxiliar = cantidad_auxiliar
-        self.primer_registro_logico = primer_registro_logico

@@ -46,7 +46,7 @@ class HeapFile:
     
     def _persist_metadata(self) -> None:
         # Guarda la metadata en la página 0 usando PageManager
-        # Solo llamar en momentos clave (flush, init)."""
+        # Solo llamar en momentos clave (flush, init)
         page0 = bytearray(self.pm.read_page(0))
         metadata = struct.pack(
             self._METADATA_FORMAT,
@@ -69,7 +69,7 @@ class HeapFile:
             page_id, slot_id = self.first_free_rid
             page = bytearray(self.pm.read_page(page_id))
             
-            slot_offset = self._slot_offset(slot_id)  # ← Calcula el offset correcto
+            slot_offset = self._slot_offset(slot_id)
 
             # El hueco almacena el siguiente RID disponible en sus primeros 8 bytes
             if len(page) >= slot_offset + 8:
@@ -78,10 +78,9 @@ class HeapFile:
             else:
                 self.first_free_rid = (-1, -1)
             self.total_records += 1
-            # Sobrescribe el slot con el nuevo registro
+
             self._write_record_to_slot(page, slot_id, record_bytes)
             self.pm.write_page(page_id, bytes(page))
-            # Metadata se mantiene en RAM; se persiste en flush()
             return (page_id, slot_id)
         
         # Caso 2: No hay huecos
@@ -93,8 +92,8 @@ class HeapFile:
         if record_count >= self.records_per_page:
             page_id = self.pm.allocate_new_page()
             self.last_page_id = page_id
-            page = bytearray(self.pm.read_page(page_id))  # ← Leer desde PM
-            record_count = self._read_page_header(page)   # ← Obtener count real
+            page = bytearray(self.pm.read_page(page_id))  # Leer desde PM
+            record_count = self._read_page_header(page)   # Obtener count real
         
         slot_id = record_count
         self._write_record_to_slot(page, slot_id, record_bytes)
@@ -102,9 +101,7 @@ class HeapFile:
         self._write_page_header(page, record_count)
         
         self.pm.write_page(page_id, bytes(page))
-        self.total_records += 1
-        # Metadata se mantiene en RAM; se persiste en flush()
-        
+        self.total_records += 1        
         return (page_id, slot_id)
     
     def search(self, rid: Tuple[int, int]) -> Optional[Record]:
@@ -119,9 +116,8 @@ class HeapFile:
         data_tuple = struct.unpack(self.config.data_format, record_bytes)
         return Record(data_tuple, self.config)
     
-    #Util para busqueda por rango tras obtener lista de RIDs proporcionada por los indices
+    #Busqueda por rango tras obtener lista de RIDs de los indices
     def get_batch(self, rid_list: List[Tuple[int, int]]) -> List[Record]:
-        #Recupera múltiples registros agrupando por página
         if not rid_list:
             return []
         
@@ -165,12 +161,10 @@ class HeapFile:
         if not op_func:
             raise ValueError(f"Operador no soportado: {operator_str}")
             
-        # Validación para BETWEEN
         if operator_str == 'BETWEEN' and (not isinstance(value, (list, tuple)) or len(value) != 2):
             raise ValueError("Para el operador BETWEEN, 'value' debe ser una tupla o lista de dos elementos (v1, v2)")
             
         results = []
-        # Iterar sobre todas las páginas de datos
         for page_id in range(1, self.last_page_id + 1):
             try:
                 page = self.pm.read_page(page_id)
@@ -244,8 +238,8 @@ class HeapFile:
         return True
     
     def load_from_csv_optimized(self, csv_path: str) -> List[Tuple[Tuple[int, int], Tuple]]:
-        #Carga desde un archivo csv a un formato binario; retorna una lista de tuplas 
-        # (RID, data_tuple) para cada registro
+        # Carga desde un archivo csv a un formato binario - > retorna 
+        # una lista de (RID, data_tuple)
         results = []
         
         # Orden de columnas según column_map
@@ -264,7 +258,6 @@ class HeapFile:
         with open(csv_path, newline='', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                # Conversión vectorizada con formatos pre-compilados
                 values = []
                 for col_name, col_fmt in zip(col_names, conversions):
                     raw = row[col_name].strip()

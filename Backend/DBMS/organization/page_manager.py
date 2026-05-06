@@ -10,11 +10,9 @@ class PageManager:
         #Contador global de I/O compartido
         self.io_counter  = io_counter
 
-        #Cache: ultima pagina accedida
         self.last_page_id_loaded = -1
         self.last_page_data = None
 
-        # Crea el archivo si no existe
         if not os.path.exists(db_filename):
           with open(db_filename, 'wb') as f:
               pass
@@ -31,7 +29,8 @@ class PageManager:
         with open(self.db_filename, 'rb') as f:
             f.seek(offset)
             data_leida = f.read(self.PAGE_SIZE)
-        #Rellenamos con ceros si el contenido de la pagina no llega a ser 4KB
+
+        #Si el contenido de la pagina no llega a ser 4KB, rellenamos con 0s
         if len(data_leida) < self.PAGE_SIZE:
            data_leida = data_leida.ljust(self.PAGE_SIZE, b'\x00')
         self.last_page_id_loaded = page_id
@@ -46,6 +45,7 @@ class PageManager:
         with open(self.db_filename, 'r+b') as f:
             f.seek(offset)
             f.write(data.ljust(self.PAGE_SIZE, b'\x00'))
+            
         # Si la pagina es la misma en cache, reiniciamos el cache para mantener la consistencia (version)
         if page_id == self.last_page_id_loaded:
           self.last_page_id_loaded = -1
@@ -69,7 +69,6 @@ class PageManager:
         # Asigna una nueva página
         file_size = os.path.getsize(self.db_filename)
         
-        # VALIDACIÓN CRÍTICA: el archivo debe ser múltiplo de PAGE_SIZE
         if file_size % self.PAGE_SIZE != 0:
             raise ValueError(
                 f"Archivo corrupto: tamaño {file_size} bytes "
@@ -80,7 +79,7 @@ class PageManager:
         
         try:
             with open(self.db_filename, 'r+b') as f:
-                f.seek(0, 2)  # Ir al final
+                f.seek(0, 2)
                 f.write(b'\x00' * self.PAGE_SIZE)
                 f.flush()  # Forzar escritura a disco
         except IOError as e:
@@ -91,7 +90,7 @@ class PageManager:
         return new_page_id
     
 class IOCounter:
-    # Contador global de I/O compartido entre todos los PageManagers."""
+    # Contador global de I/O compartido
     
     def __init__(self):
         self.reads  = 0
