@@ -53,6 +53,7 @@ class DBMSEngine:
         if not esquema:
              raise Exception(f"Error: La tabla '{table_name}' no existe en el catálogo.")
         
+        spatial_meta = None
         columnas_fisicas = []
         for col in esquema:
             if col["tipo"] == "POINT":
@@ -63,6 +64,9 @@ class DBMSEngine:
                     cx, cy = f"{col['nombre']}_x", f"{col['nombre']}_y"
                 columnas_fisicas.append({"nombre": cx, "tipo": "DOUBLE"})
                 columnas_fisicas.append({"nombre": cy, "tipo": "DOUBLE"})
+
+                if col.get("index_tech") == "RTREE":
+                    spatial_meta = {"col_x": cx, "col_y": cy}
             else:
                 columnas_fisicas.append(col)
         
@@ -73,7 +77,7 @@ class DBMSEngine:
         
         table_config = TableConfig(formato_binario, nombres_columnas, pk_col_name)
         
-        self.storage.open_table(table_name, table_config, pk_col_name)
+        self.storage.open_table(table_name, table_config, pk_col_name, spatial_meta)
 
         meta = (esquema, table_config, pk_col_name)
         self._metadata_cache[table_name] = meta
@@ -140,6 +144,7 @@ class DBMSEngine:
         self.catalog.create_table(table_name, columns)
 
         # manejo de tipo point como dos columnas físicas (x e y)
+        spatial_meta = None
         columnas_fisicas = []
         for col in columns:
             if col["tipo"] == "POINT":
@@ -147,10 +152,15 @@ class DBMSEngine:
                     cx, cy = col["mapped_by"]
                 else:
                     cx, cy = f"{col['nombre']}_x", f"{col['nombre']}_y"
+
                 columnas_fisicas.append({"nombre": cx, "tipo": "DOUBLE"})
                 columnas_fisicas.append({"nombre": cy, "tipo": "DOUBLE"})
+
+                if col.get("index_tech") == "RTREE":
+                    spatial_meta = {"col_x": cx, "col_y": cy}
             else:
                 columnas_fisicas.append(col)
+
 
         formato_binario = self._generar_formato_struct(columnas_fisicas)
         nombres_columnas = [col["nombre"] for col in columnas_fisicas]
@@ -160,11 +170,11 @@ class DBMSEngine:
 
         if filepath:
             print(f"\n[EXECUTE] Delegando carga masiva al Storage Engine...")
-            result = self.storage.create_table_from_csv(table_name, table_config, filepath, pk_col_name)
+            result = self.storage.create_table_from_csv(table_name, table_config, filepath, pk_col_name, spatial_meta)
             print(f"{result}")
         else:
              print(f"\n[EXECUTE] Delegando creación física al Storage Engine...")
-             self.storage.open_table(table_name, table_config, pk_col_name)
+             self.storage.open_table(table_name, table_config, pk_col_name, spatial_meta)
              print(f" [CREATE] tabla '{table_name}' creada.")
 
 
@@ -288,6 +298,9 @@ class DBMSEngine:
         # OTROS ÍNDICES 
         elif tech == "BTREE":
             print(f"\n[HOOK] Ejecutando Index Scan usando B-Tree para la columna '{col_name}'.")
+            
+
+
         
         elif tech == "HASH":
             if search_type == "RANGE":
@@ -297,10 +310,33 @@ class DBMSEngine:
                 
         elif tech == "RTREE":
             print(f"\n[HOOK] Ejecutando Spatial Index Scan usando R-Tree para la columna '{col_name}'.")
+            x, y = ast["point"]
+            
+            if search_type == "RTREE_RADIUS":
+                radius = ast["radius"]
+                print(f"\n[EXECUTE] Spatial Scan: Buscando puntos a radio {radius} de POINT({x}, {y})...")
+                result = self.storage.search_spatial_radius(table_name, x, y, radius)
+                
+            elif search_type == "RTREE_KNN":
+                k = ast["k"]
+                print(f"\n[EXECUTE] Spatial Scan: Buscando {k} vecinos cercanos a POINT({x}, {y})...")
+                result = self.storage.search_spatial_knn(table_name, x, y, k)
+                
+            print(f"{result}")
+            if result.records:
+                for r in result.records:
+                    print(f"   -> Registro: {self._clean_tuple(r.data_tuple, esquema)}")
+            else:
+                print("   -> 0 registros encontrados.")
             
         # Sin índice soportado (Full Table Scan)
         else:
             print(f"\n[ADVERTENCIA] La columna '{col_name}' no tiene un índice asignado")
+
+            if tipo_columna == "POINT":
+                print(f"\n[ERROR] La columna '{col_name}' es de tipo POINT y no tiene un índice RTREE.")
+                print("   -> El Full Table Scan espacial no está soportado :c.")
+                return
 
             if search_type == "SEARCH":
                 op = "="
