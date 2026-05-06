@@ -85,9 +85,9 @@ class RtreeFile:
     # FILE_PATH = os.path.join(FILE_DIR, "RtreeFile.bin")
     # MAX_ENTRIES = (PAGE_SIZE - PAGE_HEADER_SIZE) // NODE_ENTRY_SIZE
 
-    def __init__(self):
+    def __init__(self, filename="RtreeFile.bin"):
         os.makedirs(FILE_DIR, exist_ok=True)
-        self.FILE_PATH = os.path.join(FILE_DIR, "RtreeFile.bin")
+        self.FILE_PATH = os.path.join(FILE_DIR, filename)
         try:
             self.read_file_header()
         except (FileNotFoundError, struct.error):
@@ -461,8 +461,8 @@ class Rtree:
                 self._aux_range_search(child, point, radio, result)
 
     #NOTE: Metodos publicos
-    def __init__(self):
-        self.RTREE_FILE = RtreeFile()
+    def __init__(self, filename="RtreeFile.bin"):
+        self.RTREE_FILE = RtreeFile(filename)
 
         if self.RTREE_FILE.FILE_HEADER.ROOT_PAGE == -1:
             root = self._create_node(is_leaf=True)

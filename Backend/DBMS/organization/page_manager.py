@@ -1,5 +1,4 @@
-#Capa 1: Acceso a Disco
-
+   #Capa 1: Acceso a Disco
 import os
 
 class PageManager:

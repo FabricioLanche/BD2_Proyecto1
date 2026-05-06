@@ -40,8 +40,20 @@ class SQLParser:
             col_name = self.match('ID').value
             
             # tipo de Dato de columna
+            mapped_by = None
             if self.current().type == 'POINT_TYPE':
                 col_type = self.match('POINT_TYPE').value.upper()
+
+                if self.current().type == 'MAPPED':
+                    self.match('MAPPED')
+                    self.match('BY')
+                    self.match('OP') # (
+                    col_x = self.match('ID').value
+                    self.match('OP') # ,
+                    col_y = self.match('ID').value
+                    self.match('OP') # )
+                    mapped_by = (col_x, col_y)
+
             else:
                 col_type = self.match('TYPE').value.upper()
                 if col_type == 'VARCHAR':
@@ -65,7 +77,8 @@ class SQLParser:
                 "nombre": col_name, 
                 "tipo": col_type, 
                 "primary_key": is_primary,
-                "index_tech": index_tech
+                "index_tech": index_tech,
+                "mapped_by": mapped_by
             })
             
             if self.current().value == ')': break
@@ -99,7 +112,7 @@ class SQLParser:
         curr = self.current()
         if curr.value == '=':
             self.match('OP')
-            val = self.match('NUM').value if self.current().type == 'NUM' else self.match('STRING').value.replace('"', '')
+            val = self.match('NUM').value if self.current().type == 'NUM' else self.match('STRING').value.strip("'\"")
             return {"action": "SELECT", "type": "SEARCH", "table": table, "col": col, "val": val}
         
         elif curr.type == 'BETWEEN':
@@ -124,13 +137,13 @@ class SQLParser:
                 self.match('RADIUS')
                 r = float(self.match('NUM').value)
                 self.match('OP') # )
-                return {"action": "SELECT", "type": "RTREE_RADIUS", "table": table, "point": [x, y], "radius": r}
+                return {"action": "SELECT", "type": "RTREE_RADIUS", "table": table, "col": col, "point": [x, y], "radius": r}
                 
             elif self.current().type == 'K':
                 self.match('K')
                 k = int(self.match('NUM').value)
                 self.match('OP') # )
-                return {"action": "SELECT", "type": "RTREE_KNN", "table": table, "point": [x, y], "k": k}
+                return {"action": "SELECT", "type": "RTREE_KNN", "table": table, "col": col, "point": [x, y], "k": k}
 
     def parse_id_list(self):
         ids = []
@@ -156,7 +169,7 @@ class SQLParser:
                 values.append(val)
                 self.match('NUM')
             elif curr.type == 'STRING':
-                values.append(curr.value.replace('"', ''))
+                values.append(curr.value.strip("'\""))
                 self.match('STRING')
             elif curr.type == 'POINT_TYPE':
                 self.match('POINT_TYPE')
@@ -184,5 +197,5 @@ class SQLParser:
         if self.current().type == 'NUM':
             val = self.match('NUM').value
         else:
-            val = self.match('STRING').value.replace('"', '')
+            val = self.match('STRING').value.strip("'\"")
         return {"action": "DELETE", "table": table, "col": col, "val": val}

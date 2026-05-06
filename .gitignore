@@ -2,3 +2,9 @@
 data
 graphs
 __pycache__
+
+*.heap
+*.idx
+*.bin
+*.tmp
+*.csv
