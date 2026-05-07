@@ -223,7 +223,13 @@ class DatabaseEngine:
                 col_name = meta["nombre"]
                 hash_filename = f"{table_name}_{col_name}.hash"
                 h_pm = PageManager(hash_filename, io_counter)
+
+                original_pk_index = config.pk_index
+                config.pk_index = config.column_map[col_name]
+
                 self._tables[table_name].hash_indices[col_name] = ExtendibleHashing(h_pm, config)
+
+                config.pk_index = original_pk_index
 
         if spatial_meta:
             rtree_filename = f"{table_name}_spatial.bin"
