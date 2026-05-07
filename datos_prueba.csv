@@ -1,4 +1,5 @@
-codigo,nombre,precio,lat,lon
-"KB-001","Teclado Mecanico",120.50,-12.05,-77.03
-"MH-002","Pocion Maxima",15.00,-12.06,-77.04
-"SD-003","SayoDevice",45.00,-12.04,-77.02
+codigo,nombre,categoria,lat,lon
+"L-01","Parque Kennedy","Parque",-12.12,-77.03
+"L-02","Campus UTEC","Universidad",-12.14,-77.02
+"L-03","Larcomar","Comercio",-12.13,-77.03
+"L-04","Museo MAC","Museo",-12.14,-77.01

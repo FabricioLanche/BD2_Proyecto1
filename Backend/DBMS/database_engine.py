@@ -285,12 +285,33 @@ class DatabaseEngine:
         t0 = time.perf_counter()
         self._reset_io(t)
 
+        rid = t.index.search_rid(pk)
+        if not rid:
+            return QueryResult(False, t.io_counter.snapshot(), 0, "DELETE")
+
+        record = t.heap.search(rid)
+
+        for col_name, h_index in t.hash_indices.items():
+            val = record.get_attribute(col_name)
+
+            if isinstance(val, bytes):
+                val = val.decode('utf-8', errors='ignore').rstrip('\x00')
+                
+            h_index.remove(val)
+
+        if t.rtree:
+            idx_x = t.config.column_map[t.spatial_meta["col_x"]]
+            idx_y = t.config.column_map[t.spatial_meta["col_y"]]
+            point = (record.data_tuple[idx_x], record.data_tuple[idx_y])
+            t.rtree.remove(point)
+
         rid     = t.index.remove(pk)
         deleted = False
         if rid:
             deleted = t.heap.delete(rid)
 
         elapsed = (time.perf_counter() - t0) * 1000
+        self.flush_table(table_name)
         return QueryResult(deleted, t.io_counter.snapshot(), elapsed, "DELETE")
 
     def scan(self, table_name: str) -> QueryResult:

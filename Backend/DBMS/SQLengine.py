@@ -120,6 +120,7 @@ class DBMSEngine:
         
         pk_col_name = "id"
         pk_count = 0
+        rtree_count = 0
         hash_meta = []
         for col in columns:
             if col.get("primary_key"):
@@ -142,7 +143,9 @@ class DBMSEngine:
                     if tipo == "POINT":
                         raise Exception(f"Error Semántico: La técnica HASH no es compatible con el tipo POINT. Use RTREE para columnas espaciales.")
                     hash_meta.append(col)
-                elif tech == "RTREE" and tipo != "POINT":
+                elif tech == "RTREE":
+                    rtree_count += 1
+                    if tipo != "POINT":
                         raise Exception(f"Error Semántico: RTREE es un índice espacial y solo soporta el tipo POINT. La columna '{col['nombre']}' es {tipo}.")
                 if tipo == "POINT" and tech != "RTREE":
                     raise Exception(f"Error Semántico: El tipo POINT no puede ser indexado usando {tech}. Debe usar RTREE.")
@@ -152,6 +155,10 @@ class DBMSEngine:
         elif pk_count == 0:
             raise Exception(f"Error Semántico: No se ha definido una PRIMARY KEY para '{table_name}'. Se requiere al menos una columna con PRIMARY KEY.")
         
+        if rtree_count > 1:
+            raise Exception(f"Error Semántico: Múltiples índices RTREE detectados en '{table_name}'. El motor solo soporta un índice espacial por tabla.")
+
+
         self.catalog.create_table(table_name, columns)
 
         # manejo de tipo point como dos columnas físicas (x e y)
@@ -271,7 +278,9 @@ class DBMSEngine:
         tipo_columna = col_meta.get("tipo")
         tech = col_meta.get("index_tech") 
 
-        # PK con Sequential Index (Solo INT y DOUBLE)
+        if tipo_columna == "POINT" and search_type in ["SEARCH", "RANGE"]:
+            raise Exception(f"Error Semántico: No se puede usar '=' o 'BETWEEN' en la columna espacial '{col_name}'. Usar 'IN (POINT(x, y)...)'.")
+
         if es_llave_primaria and tech == "SEQUENTIAL":
             if search_type == "SEARCH":
                 val = ast["val"]
@@ -376,7 +385,7 @@ class DBMSEngine:
                 elif tipo_columna == "DOUBLE": v1, v2 = float(v1), float(v2)
                 elif isinstance(v1, str) and isinstance(v2, str):
                     v1, v2 = v1.strip("'\""), v2.strip("'\"")
-                val = (v1, v2) # filter_records espera una tupla para BETWEEN
+                val = (v1, v2)
             
             try:
                 tabla = self.storage._tables[table_name]
@@ -392,5 +401,72 @@ class DBMSEngine:
 
     def _execute_delete(self, ast):
         table_name = ast["table"]
+        col_name = ast["col"]
+        val = ast["val"]
+
         esquema, table_config, pk_col_name = self._get_table_metadata(table_name)
-        print(f"\n[HOOK] -> Buscar registro en índices y marcar 'is_deleted = 1' en Sequential File.")
+
+        col_meta = next((c for c in esquema if c["nombre"] == col_name), None)
+        if not col_meta:
+            raise Exception(f"Error: La columna '{col_name}' no existe en la tabla '{table_name}'.")
+
+        tipo_columna = col_meta["tipo"]
+        tech = col_meta.get("index_tech")
+
+        if tipo_columna == "INT": val = int(val)
+        elif tipo_columna == "DOUBLE": val = float(val)
+        elif isinstance(val, str): val = val.strip("'\"")
+
+        print(f"\n[EXECUTE] Procesando DELETE en '{table_name}' WHERE {col_name} = {val}...")
+
+        if col_name == pk_col_name:
+            result = self.storage.delete(table_name, val)
+            if result.records:
+                print(f"   Registro con PK '{val}' eliminado exitosamente.")
+            else:
+                print(f"   -> No se encontró ningún registro con PK '{val}'.")
+            return
+
+        if tech == "HASH":
+            print(f"   Usando índice HASH en '{col_name}' para localizar el registro...")
+            search_result = self.storage.search_hash(table_name, col_name, val)
+            
+            if search_result.records:
+                pk_val = search_result.records.get_pk()
+
+                if isinstance(pk_val, bytes):
+                    pk_val = pk_val.decode('utf-8', errors='ignore').rstrip('\x00')
+
+                del_result = self.storage.delete(table_name, pk_val)
+                if del_result.records:
+                    print(f"   Registro localizado por HASH y eliminado en cascada exitosamente.")
+            else:
+                print(f"   -> No se encontraron registros donde {col_name} = {val}.")
+            return
+        
+        print(f"   La columna '{col_name}' no tiene índice. Iniciando Full Table Scan...")
+
+        
+        try:
+            tabla = self.storage._tables[table_name]
+            resultados = tabla.heap.filter_records(col_name, "=", val)
+            
+            if not resultados:
+                print(f"   -> No se encontraron registros donde {col_name} = {val}.")
+                return
+                
+            eliminados = 0
+            for r in resultados:
+                pk_val = r.get_pk()
+                
+                if isinstance(pk_val, bytes):
+                    pk_val = pk_val.decode('utf-8', errors='ignore').rstrip('\x00')
+
+                res = self.storage.delete(table_name, pk_val)
+                if res.records:
+                    eliminados += 1
+                    
+            print(f"   {eliminados} registro(s) eliminado(s) tras Full Table Scan.")
+            
+        except Exception as e:
+            print(f"[ERROR] Fallo al eliminar: {e}")
