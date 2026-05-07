@@ -136,8 +136,8 @@ class DBMSEngine:
                 if tech == "SEQUENTIAL":
                     if not col.get("primary_key"):
                         raise Exception(f"Error Semántico: El índice SEQUENTIAL solo está soportado para la PRIMARY KEY. La columna '{col['nombre']}' no es PK.")
-                    if tipo not in ["INT", "DOUBLE"]:
-                        raise Exception(f"Error Semántico: SEQUENTIAL solo soporta columnas numéricas. La columna '{col['nombre']}' es {tipo}.")
+                    if tipo not in ["INT", "DOUBLE"] and not tipo.startswith("VARCHAR"):
+                        raise Exception(f"Error Semántico: SEQUENTIAL no soporta el tipo {tipo}. La columna '{col['nombre']}' debe ser INT, DOUBLE o VARCHAR.")
                 elif tech == "HASH":
                     if tipo == "POINT":
                         raise Exception(f"Error Semántico: La técnica HASH no es compatible con el tipo POINT. Use RTREE para columnas espaciales.")
@@ -279,7 +279,9 @@ class DBMSEngine:
                     val = int(val)
                 elif tipo_columna == "DOUBLE": 
                     val = float(val)
-
+                elif isinstance(val, str): 
+                    val = val.strip("'\"")
+                
                 print(f"\n[EXECUTE] Index Scan: Buscando PK '{col_name} = {val}' usando Sequential Index...")
                 result = self.storage.search(table_name, val)
                 

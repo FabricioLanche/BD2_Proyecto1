@@ -1,4 +1,4 @@
-id,nombre,categoria,lat,lon
-1,"Pizza Hut","Comida",-12.05,-77.03
-2,"Cineplanet","Cine",-12.06,-77.04
-3,"Inkafarma","Salud",-12.04,-77.02
+codigo,nombre,precio,lat,lon
+"KB-001","Teclado Mecanico",120.50,-12.05,-77.03
+"MH-002","Pocion Maxima",15.00,-12.06,-77.04
+"SD-003","SayoDevice",45.00,-12.04,-77.02

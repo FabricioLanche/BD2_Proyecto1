@@ -631,7 +631,10 @@ class SequentialIndex:
     
     def _write_entry_on_page(self, page: bytearray, slot_idx: int, pk: int, rid_p: int, rid_s: int, next_pos: int) -> None:
         offset = 4 + (slot_idx * self.NODE_SIZE)
-        entry_bytes = struct.pack(self.NODE_FORMAT, pk, rid_p, rid_s, next_pos)
+
+        pk_to_pack = pk.encode('utf-8') if self.pk_is_str and isinstance(pk, str) else pk
+
+        entry_bytes = struct.pack(self.NODE_FORMAT, pk_to_pack, rid_p, rid_s, next_pos)
         page[offset:offset + self.NODE_SIZE] = entry_bytes
     
     def _read_page_header(self, page: bytes) -> int:

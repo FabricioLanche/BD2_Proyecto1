@@ -117,9 +117,19 @@ class SQLParser:
         
         elif curr.type == 'BETWEEN':
             self.match('BETWEEN')
-            v1 = float(self.match('NUM').value)
+            
+            if self.current().type == 'NUM':
+                v1 = float(self.match('NUM').value)
+            else:
+                v1 = self.match('STRING').value.strip("'\"")
+
             self.match('AND')
-            v2 = float(self.match('NUM').value)
+
+            if self.current().type == 'NUM':
+                v2 = float(self.match('NUM').value)
+            else:
+                v2 = self.match('STRING').value.strip("'\"")
+
             return {"action": "SELECT", "type": "RANGE", "table": table, "col": col, "range": [v1, v2]}
             
         elif curr.type == 'IN':
