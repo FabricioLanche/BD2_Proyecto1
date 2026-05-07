@@ -241,9 +241,8 @@ class DBMSEngine:
             self.storage.flush_table(table_name)
             
         except Exception as e:
-            print(f"Error en el Storage Engine durante INSERT: {e}")
-
-
+            self.logger.error(f"Error en el Storage Engine durante INSERT en '{table_name}': {e}")
+            
     def _execute_select(self, ast):
         table_name = ast["table"]
         col_name = ast["col"]
@@ -260,21 +259,23 @@ class DBMSEngine:
         tipo_columna = col_meta.get("tipo")
         tech = col_meta.get("index_tech") 
 
-        # PK con Sequential Index (Solo INT y DOUBLE)
+        # Columnas lógicas (nombres del esquema original) para el encabezado
+        col_headers = [col["nombre"] for col in esquema]
+
+        # PK con Sequential Index
         if es_llave_primaria and tech == "SEQUENTIAL":
             if search_type == "SEARCH":
                 val = ast["val"]
-                if tipo_columna == "INT": 
-                    val = int(val)
-                elif tipo_columna == "DOUBLE": 
-                    val = float(val)
+                if tipo_columna == "INT":      val = int(val)
+                elif tipo_columna == "DOUBLE": val = float(val)
 
                 print(f"\n[EXECUTE] Index Scan: Buscando PK '{col_name} = {val}' usando Sequential Index...")
                 result = self.storage.search(table_name, val)
-                
-                print(f"{result}")
+                self.logger.info(f"{result}")
+
                 if result.records:
-                     print(f"   -> Registro Encontrado: {self._clean_tuple(result.records.data_tuple, esquema)}")
+                    row = list(self._clean_tuple(result.records.data_tuple, esquema))
+                    self.logger.result(col_headers, [row])
                 else:
                      print("   -> 0 registros encontrados.")
 
@@ -287,11 +288,11 @@ class DBMSEngine:
                     
                 print(f"\n[EXECUTE] Index Scan: Buscando PK '{col_name} BETWEEN {v1} AND {v2}' usando Sequential Index...")
                 result = self.storage.range_search(table_name, v1, v2)
-                
-                print(f"{result}")
+                self.logger.info(f"{result}")
+
                 if result.records:
-                    for r in result.records:
-                        print(f"   -> Registro: {self._clean_tuple(r.data_tuple, esquema)}")
+                    rows = [list(self._clean_tuple(r.data_tuple, esquema)) for r in result.records]
+                    self.logger.result(col_headers, rows)
                 else:
                     print("   -> 0 registros encontrados.")
                     
@@ -324,8 +325,8 @@ class DBMSEngine:
                 
             print(f"{result}")
             if result.records:
-                for r in result.records:
-                    print(f"   -> Registro: {self._clean_tuple(r.data_tuple, esquema)}")
+                rows = [list(self._clean_tuple(r.data_tuple, esquema)) for r in result.records]
+                self.logger.result(col_headers, rows)
             else:
                 print("   -> 0 registros encontrados.")
             
@@ -346,9 +347,9 @@ class DBMSEngine:
                 elif isinstance(val, str): val = val.strip("'\"")
                 
             elif search_type == "RANGE":
-                op = "BETWEEN"
+                op     = "BETWEEN"
                 v1, v2 = ast["range"]
-                if tipo_columna == "INT": v1, v2 = int(v1), int(v2)
+                if tipo_columna == "INT":      v1, v2 = int(v1),   int(v2)
                 elif tipo_columna == "DOUBLE": v1, v2 = float(v1), float(v2)
                 elif isinstance(v1, str) and isinstance(v2, str):
                     v1, v2 = v1.strip("'\""), v2.strip("'\"")
@@ -357,15 +358,13 @@ class DBMSEngine:
             try:
                 tabla = self.storage._tables[table_name]
                 resultados = tabla.heap.filter_records(col_name, op, val)
-                
-                print(f"Full Table Scan completado.")
-                print(f"   -> Registros que cumplen la condición ({len(resultados)}):")
-                for r in resultados:
-                    print(f"      * {self._clean_tuple(r.data_tuple, esquema)}")
+                self.logger.info(f"Full Table Scan completado. {len(resultados)} registro(s) encontrado(s).")
+                if resultados:
+                    rows = [list(self._clean_tuple(r.data_tuple, esquema)) for r in resultados]
+                    self.logger.result(col_headers, rows)
             except Exception as e:
-                print(f"[ERROR] Fallo en el escaneo: {e}")
-
-
+                self.logger.error(f"Fallo en el Full Table Scan de '{table_name}': {e}")
+                
     def _execute_delete(self, ast):
         table_name = ast["table"]
         esquema, table_config, pk_col_name = self._get_table_metadata(table_name)
