@@ -1,6 +1,18 @@
 from enum import Enum
 import queue
 
+
+def _normalize_value(value):
+  if isinstance(value, bytes):
+    return value.decode('utf-8', errors='ignore').rstrip('\x00')
+  if isinstance(value, tuple):
+    return [_normalize_value(item) for item in value]
+  if isinstance(value, list):
+    return [_normalize_value(item) for item in value]
+  if isinstance(value, dict):
+    return {key: _normalize_value(item) for key, item in value.items()}
+  return value
+
 class LogLevel(Enum):
   INFO = "INFO"
   ERROR = "ERROR"
@@ -48,9 +60,22 @@ class QueueLogger(Logger):
     })
 
   def result(self, columns: list, rows: list):
+    normalized_columns = [_normalize_value(column) for column in columns]
+    normalized_rows = []
+
+    for row in rows:
+      if isinstance(row, dict):
+        normalized_rows.append([
+          _normalize_value(row.get(column)) for column in normalized_columns
+        ])
+      elif isinstance(row, (list, tuple)):
+        normalized_rows.append([_normalize_value(item) for item in row])
+      else:
+        normalized_rows.append([_normalize_value(row)])
+
     self.q.put({
         "level": "RESULT",
         "type": "table",
-        "columns": columns,
-        "rows": rows
+        "columns": normalized_columns,
+        "rows": normalized_rows
     })

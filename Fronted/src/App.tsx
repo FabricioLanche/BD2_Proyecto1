@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { deleteDataset, executeQuery, fetchDatasets, restartBackend, uploadDataset } from './api/api'
+import { deleteDataset, executeQuery, fetchDatasets, restartBackend, uploadDataset, type QueryResultTable } from './api/api'
 import { Button } from './components/Button'
 import { Card } from './components/Card'
 import { DatasetsPanel } from './components/DatasetsPanel'
@@ -24,7 +24,10 @@ type QueryTab = {
   id: string
   title: string
   query: string
+  selection: string
 }
+
+type OutputView = 'logs' | 'results'
 
 type DragState = {
   type: 'vertical' | 'horizontal' | null
@@ -38,6 +41,7 @@ const createTab = (index: number): QueryTab => ({
   id: `tab-${index}-${Date.now()}`,
   title: `Query ${index}`,
   query: '',
+  selection: '',
 })
 
 export default function App() {
@@ -47,7 +51,9 @@ export default function App() {
 
   // Datasets & Output state
   const [datasets, setDatasets] = useState<string[]>([])
-  const [output, setOutput] = useState<string>('')
+  const [logs, setLogs] = useState<string>('')
+  const [resultTable, setResultTable] = useState<QueryResultTable | null>(null)
+  const [outputView, setOutputView] = useState<OutputView>('logs')
 
   // Loading states
   const [isLoadingDatasets, setIsLoadingDatasets] = useState(false)
@@ -258,15 +264,30 @@ export default function App() {
     )
   }
 
+  const handleSelectionChange = (selection: string) => {
+    setTabs((prev) =>
+      prev.map((tab) => (tab.id === activeId ? { ...tab, selection } : tab)),
+    )
+  }
+
   const handleExecute = async () => {
     if (!activeTab) return
     setIsExecuting(true)
     setStatusMessage('')
+    setLogs('')
+    setResultTable(null)
     try {
-      const result = await executeQuery(activeTab.query)
-      setOutput(result)
+      const queryToExecute = activeTab.selection.trim() || activeTab.query
+
+      const result = await executeQuery(queryToExecute, ({ logs: nextLogs, resultTable: nextResultTable }) => {
+        setLogs(nextLogs)
+        setResultTable(nextResultTable)
+      })
+      setLogs(result.logs)
+      setResultTable(result.resultTable)
     } catch (error) {
-      setOutput('')
+      setLogs('')
+      setResultTable(null)
       setStatusMessage('Ocurrio un error al ejecutar la query.')
     } finally {
       setIsExecuting(false)
@@ -321,7 +342,8 @@ export default function App() {
     setStatusMessage('')
     try {
       const message = await restartBackend()
-      setOutput(message)
+      setStatusMessage(message)
+      setResultTable(null)
       await loadDatasets()
     } catch (error) {
       setStatusMessage('No se pudo reiniciar el backend.')
@@ -352,7 +374,7 @@ export default function App() {
           onAdd={handleAddTab}
           onClose={handleCloseTab}
         />
-        <QueryEditor value={activeTab?.query ?? ''} onChange={handleQueryChange} />
+        <QueryEditor value={activeTab?.query ?? ''} onChange={handleQueryChange} onSelectionChange={handleSelectionChange} />
         <div className="panel-footer">
           <p className="panel-hint">Tip: Usa multiples pestañas para organizar tus consultas.</p>
           <Button variant="primary" onClick={handleExecute} disabled={isExecuting}>
@@ -378,7 +400,14 @@ export default function App() {
   // Right bottom panel - wrap in Card to apply collapsed styling
   const rightBottomPanel = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, minWidth: 0 }}>
-      <OutputPanel output={output} isRestarting={isRestarting} onRestart={handleRestart} />
+      <OutputPanel
+        logs={logs}
+        resultTable={resultTable}
+        view={outputView}
+        onViewChange={setOutputView}
+        isRestarting={isRestarting}
+        onRestart={handleRestart}
+      />
     </div>
   )
 

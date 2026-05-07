@@ -4,9 +4,10 @@ import { useLineNumbers } from '../hooks/useLineNumbers'
 type QueryEditorProps = {
   value: string
   onChange: (value: string) => void
+  onSelectionChange?: (selection: string) => void
 }
 
-export function QueryEditor({ value, onChange }: QueryEditorProps) {
+export function QueryEditor({ value, onChange, onSelectionChange }: QueryEditorProps) {
   const gutterRef = useRef<HTMLDivElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const editorRef = useRef<HTMLDivElement | null>(null)
@@ -38,6 +39,14 @@ export function QueryEditor({ value, onChange }: QueryEditorProps) {
     if (gutterRef.current) {
       gutterRef.current.scrollTop = event.currentTarget.scrollTop
     }
+  }
+
+  const handleSelectionChange = () => {
+    if (!onSelectionChange || !textareaRef.current) return
+
+    const { selectionStart, selectionEnd, value: textValue } = textareaRef.current
+    const selectedText = selectionStart !== selectionEnd ? textValue.slice(selectionStart, selectionEnd) : ''
+    onSelectionChange(selectedText)
   }
 
   return (
@@ -86,6 +95,9 @@ export function QueryEditor({ value, onChange }: QueryEditorProps) {
         value={value ?? ''}
         onChange={(event) => onChange(event.target.value)}
         onScroll={handleTextareaScroll}
+        onSelect={handleSelectionChange}
+        onMouseUp={handleSelectionChange}
+        onKeyUp={handleSelectionChange}
         spellCheck={false}
       />
     </div>

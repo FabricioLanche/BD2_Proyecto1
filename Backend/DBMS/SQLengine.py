@@ -262,6 +262,10 @@ class DBMSEngine:
         # Columnas lógicas (nombres del esquema original) para el encabezado
         col_headers = [col["nombre"] for col in esquema]
 
+        # Función auxiliar para convertir tupla a diccionario
+        def tuple_to_dict(data_tuple, cols):
+            return {col["nombre"]: val for col, val in zip(cols, data_tuple)}
+
         # PK con Sequential Index
         if es_llave_primaria and tech == "SEQUENTIAL":
             if search_type == "SEARCH":
@@ -274,8 +278,8 @@ class DBMSEngine:
                 self.logger.info(f"{result}")
 
                 if result.records:
-                    row = list(self._clean_tuple(result.records.data_tuple, esquema))
-                    self.logger.result(col_headers, [row])
+                    row_dict = tuple_to_dict(result.records.data_tuple, esquema)
+                    self.logger.result(col_headers, [row_dict])
                 else:
                      print("   -> 0 registros encontrados.")
 
@@ -291,7 +295,7 @@ class DBMSEngine:
                 self.logger.info(f"{result}")
 
                 if result.records:
-                    rows = [list(self._clean_tuple(r.data_tuple, esquema)) for r in result.records]
+                    rows = [tuple_to_dict(r.data_tuple, esquema) for r in result.records]
                     self.logger.result(col_headers, rows)
                 else:
                     print("   -> 0 registros encontrados.")
@@ -325,7 +329,7 @@ class DBMSEngine:
                 
             print(f"{result}")
             if result.records:
-                rows = [list(self._clean_tuple(r.data_tuple, esquema)) for r in result.records]
+                rows = [tuple_to_dict(r.data_tuple, esquema) for r in result.records]
                 self.logger.result(col_headers, rows)
             else:
                 print("   -> 0 registros encontrados.")
@@ -360,7 +364,7 @@ class DBMSEngine:
                 resultados = tabla.heap.filter_records(col_name, op, val)
                 self.logger.info(f"Full Table Scan completado. {len(resultados)} registro(s) encontrado(s).")
                 if resultados:
-                    rows = [list(self._clean_tuple(r.data_tuple, esquema)) for r in resultados]
+                    rows = [tuple_to_dict(r.data_tuple, esquema) for r in resultados]
                     self.logger.result(col_headers, rows)
             except Exception as e:
                 self.logger.error(f"Fallo en el Full Table Scan de '{table_name}': {e}")

@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from pathlib import Path
 import shutil
 import os
+import json
 
 router = APIRouter()
 
@@ -14,7 +15,48 @@ class QueryRequest(BaseModel):
 
 @router.post("/query")
 def ejecutar_query(data: QueryRequest):
-    return {"result": data.query}
+
+    log_queue = queue.Queue()
+    logger = QueueLogger(log_queue)
+
+    _SENTINEL = object()
+
+    def run_engine():
+        try:
+            with ENGINE_LOCK:
+                previous_logger = ENGINE.logger
+                ENGINE.set_logger(logger)
+                try:
+                    ENGINE.execute_query(data.query)
+                finally:
+                    ENGINE.set_logger(previous_logger)
+        except Exception as e:
+            logger.error(f"Error inesperado en el engine: {e}")
+        finally:
+            log_queue.put(_SENTINEL)
+
+    def generator():
+        thread = threading.Thread(target=run_engine, daemon=True)
+        thread.start()
+
+        while True:
+            item = log_queue.get()
+            if item is _SENTINEL:
+                break
+            
+            # Manejar dos tipos de items:
+            # 1. Log simple: {"level": "...", "message": "..."}
+            # 2. Resultado tabular: {"level": "RESULT", "type": "table", "columns": [...], "rows": [...]}
+            if item.get("type") == "table":
+                # Serializar como JSON para que el frontend lo pueda parsear
+                yield json.dumps(item) + "\n"
+            else:
+                # Log simple
+                yield f"[{item['level']}]: {item['message']}\n"
+
+        thread.join()
+
+    return StreamingResponse(generator(), media_type="text/plain")
 
 @router.get("/dataset/list")
 async def list_datasets():

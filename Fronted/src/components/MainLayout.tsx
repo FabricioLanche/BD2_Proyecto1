@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode, PointerEvent as ReactPointerEvent, RefObject } from 'react'
+import { useEffect, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 
 const COLLAPSE_OVERLAY_ANIMATION_MS = 180
 

@@ -12,9 +12,143 @@ type DatasetsResponse = {
   datasets?: string[]
 }
 
-export async function executeQuery(query: string): Promise<string> {
-  const { data } = await api.post<QueryResponse>('/query', { query })
-  return data.result ?? 'La query se ejecutó correctamente.'
+export type QueryResultTable = {
+  columns: string[]
+  rows: unknown[][]
+}
+
+export type QueryStreamSnapshot = {
+  logs: string
+  resultTable: QueryResultTable | null
+}
+
+function parseStreamLine(line: string): QueryStreamSnapshot {
+  const trimmed = line.trim()
+
+  if (!trimmed) {
+    return { logs: '', resultTable: null }
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      type?: string
+      columns?: unknown
+      rows?: unknown
+    }
+
+    if (parsed?.type === 'table' && Array.isArray(parsed.columns) && Array.isArray(parsed.rows)) {
+      return {
+        logs: '',
+        resultTable: {
+          columns: parsed.columns.map((column) => String(column)),
+          rows: parsed.rows as unknown[][],
+        },
+      }
+    }
+  } catch {
+    // No es JSON estructurado; tratarlo como log plano.
+  }
+
+  return { logs: line, resultTable: null }
+}
+
+export async function executeQuery(
+  query: string,
+  onUpdate?: (snapshot: QueryStreamSnapshot) => void,
+): Promise<QueryStreamSnapshot> {
+  const response = await fetch(`${NORMALIZED_API_BASE_URL}/query`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ query }),
+  })
+
+  if (!response.ok) {
+    const errorDetail = await response.text().catch(() => '')
+    throw new Error(errorDetail || `Error HTTP ${response.status}`)
+  }
+
+  if (!response.body) {
+    const fallbackText = await response.text()
+    if (fallbackText) {
+      const snapshot = fallbackText
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .reduce<QueryStreamSnapshot>((accumulator, line) => {
+          const parsed = parseStreamLine(line)
+          return {
+            logs: parsed.logs ? [accumulator.logs, parsed.logs].filter(Boolean).join('\n') : accumulator.logs,
+            resultTable: parsed.resultTable ?? accumulator.resultTable,
+          }
+        }, { logs: '', resultTable: null })
+
+      onUpdate?.(snapshot)
+      return snapshot
+    }
+    const emptySnapshot = { logs: '', resultTable: null }
+    onUpdate?.(emptySnapshot)
+    return emptySnapshot
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let bufferedText = ''
+  let logs = ''
+  let resultTable: QueryResultTable | null = null
+
+  const emit = () => {
+    onUpdate?.({ logs, resultTable })
+  }
+
+  const consumeLine = (line: string) => {
+    const parsed = parseStreamLine(line)
+    if (parsed.resultTable) {
+      resultTable = parsed.resultTable
+      emit()
+      return
+    }
+
+    if (parsed.logs) {
+      logs = logs ? `${logs}\n${parsed.logs}` : parsed.logs
+      emit()
+    }
+  }
+
+  const flushBufferedText = (text: string) => {
+    bufferedText += text
+
+    const lines = bufferedText.split(/\r?\n/)
+    bufferedText = lines.pop() ?? ''
+
+    for (const line of lines) {
+      consumeLine(line)
+    }
+  }
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    const chunk = decoder.decode(value, { stream: true })
+    if (!chunk) continue
+
+    flushBufferedText(chunk)
+  }
+
+  const trailing = decoder.decode()
+  if (trailing) {
+    flushBufferedText(trailing)
+  }
+
+  if (bufferedText.trim()) {
+    consumeLine(bufferedText)
+  }
+
+  const snapshot = { logs, resultTable }
+  onUpdate?.(snapshot)
+
+  return snapshot
 }
 
 export async function fetchDatasets(): Promise<string[]> {
