@@ -7,15 +7,17 @@ type OutputView = 'logs' | 'results'
 type OutputPanelProps = {
   logs: string
   resultTable: QueryResultTable | null
+  image?: string | null
   view: OutputView
   onViewChange: (view: OutputView) => void
   isRestarting: boolean
   onRestart: () => void
 }
 
-export function OutputPanel({ logs, resultTable, view, onViewChange, isRestarting, onRestart }: OutputPanelProps) {
+export function OutputPanel({ logs, resultTable, image, view, onViewChange, isRestarting, onRestart }: OutputPanelProps) {
   const hasLogs = logs.trim().length > 0
   const hasResultRows = Boolean(resultTable && resultTable.rows.length > 0)
+  
   const title = view === 'logs' ? 'Logs' : 'Results'
 
   const renderTableCell = (row: unknown, column: string) => {
@@ -72,33 +74,50 @@ export function OutputPanel({ logs, resultTable, view, onViewChange, isRestartin
       <div className="panel-stack">
         {view === 'logs' ? (
           <pre className="output-box">{hasLogs ? logs.trimEnd() : 'Todavia no hay logs del backend.'}</pre>
-        ) : hasResultRows && resultTable ? (
-          <div className="output-table-wrap">
-            <table className="output-table">
-              <thead>
-                <tr>
-                  {resultTable.columns.map((column) => (
-                    <th key={column}>{column}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {resultTable.rows.map((row, rowIndex) => {
-                  const rowValues = renderRowValues(row)
-
-                  return (
-                  <tr key={`${rowIndex}-${rowValues.join('|')}`}>
-                    {rowValues.map((cell, cellIndex) => (
-                      <td key={`${rowIndex}-${cellIndex}`}>{String(cell ?? '')}</td>
-                    ))}
-                  </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
         ) : (
-          <div className="output-empty-state">No hay respuestas para esta consulta.</div>
+          // Results view: prefer table, but if backend sent an image, render it instead of tabla
+          (() => {
+            if (image) {
+              return (
+                <div className="output-image-wrap">
+                  <a href={image} target="_blank" rel="noreferrer" aria-label="Abrir imagen en nueva pestaña">
+                    <img src={image} alt="R-Tree visualization" className="output-image" />
+                  </a>
+                </div>
+              )
+            }
+
+            if (hasResultRows && resultTable) {
+              return (
+                <div className="output-table-wrap">
+                  <table className="output-table">
+                    <thead>
+                      <tr>
+                        {resultTable.columns.map((column) => (
+                          <th key={column}>{column}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {resultTable.rows.map((row, rowIndex) => {
+                        const rowValues = renderRowValues(row)
+
+                        return (
+                        <tr key={`${rowIndex}-${rowValues.join('|')}`}>
+                          {rowValues.map((cell, cellIndex) => (
+                            <td key={`${rowIndex}-${cellIndex}`}>{String(cell ?? '')}</td>
+                          ))}
+                        </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            }
+
+            return <div className="output-empty-state">No hay respuestas para esta consulta.</div>
+          })()
         )}
         <div className="panel-footer">
           <span className="panel-hint">{view === 'logs' ? 'Muestra la respuesta en streaming del backend.' : 'Muestra los resultados tabulares de la consulta.'}</span>

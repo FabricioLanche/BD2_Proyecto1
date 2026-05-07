@@ -20,6 +20,7 @@ export type QueryResultTable = {
 export type QueryStreamSnapshot = {
   logs: string
   resultTable: QueryResultTable | null
+  image?: string | null
 }
 
 function parseStreamLine(line: string): QueryStreamSnapshot {
@@ -34,6 +35,9 @@ function parseStreamLine(line: string): QueryStreamSnapshot {
       type?: string
       columns?: unknown
       rows?: unknown
+      path?: string
+      image?: string
+      level?: string
     }
 
     if (parsed?.type === 'table' && Array.isArray(parsed.columns) && Array.isArray(parsed.rows)) {
@@ -44,6 +48,16 @@ function parseStreamLine(line: string): QueryStreamSnapshot {
           rows: parsed.rows as unknown[][],
         },
       }
+    }
+
+    // Mensaje de imagen desde el backend
+    if (parsed?.type === 'image' && (typeof parsed.path === 'string' || typeof parsed.image === 'string')) {
+      return { logs: '', resultTable: null, image: (parsed.path ?? parsed.image) as string }
+    }
+
+    // Compatibilidad con logger que expone level: 'IMAGE' y path
+    if (parsed?.level === 'IMAGE' && (typeof parsed.path === 'string' || typeof parsed.image === 'string')) {
+      return { logs: '', resultTable: null, image: (parsed.path ?? parsed.image) as string }
     }
   } catch {
     // No es JSON estructurado; tratarlo como log plano.
@@ -80,13 +94,14 @@ export async function executeQuery(
           return {
             logs: parsed.logs ? [accumulator.logs, parsed.logs].filter(Boolean).join('\n') : accumulator.logs,
             resultTable: parsed.resultTable ?? accumulator.resultTable,
+            image: (parsed as any).image ?? accumulator.image ?? null,
           }
-        }, { logs: '', resultTable: null })
+        }, { logs: '', resultTable: null, image: null })
 
       onUpdate?.(snapshot)
       return snapshot
     }
-    const emptySnapshot = { logs: '', resultTable: null }
+    const emptySnapshot = { logs: '', resultTable: null, image: null }
     onUpdate?.(emptySnapshot)
     return emptySnapshot
   }
@@ -96,15 +111,22 @@ export async function executeQuery(
   let bufferedText = ''
   let logs = ''
   let resultTable: QueryResultTable | null = null
+  let image: string | null = null
 
   const emit = () => {
-    onUpdate?.({ logs, resultTable })
+    onUpdate?.({ logs, resultTable, image })
   }
 
   const consumeLine = (line: string) => {
     const parsed = parseStreamLine(line)
     if (parsed.resultTable) {
       resultTable = parsed.resultTable
+      emit()
+      return
+    }
+
+    if ((parsed as any).image) {
+      image = (parsed as any).image
       emit()
       return
     }
@@ -145,10 +167,10 @@ export async function executeQuery(
     consumeLine(bufferedText)
   }
 
-  const snapshot = { logs, resultTable }
-  onUpdate?.(snapshot)
+  const finalSnapshot = { logs, resultTable, image }
+  onUpdate?.(finalSnapshot)
 
-  return snapshot
+  return finalSnapshot
 }
 
 export async function fetchDatasets(): Promise<string[]> {

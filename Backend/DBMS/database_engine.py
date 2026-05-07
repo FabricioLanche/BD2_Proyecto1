@@ -4,7 +4,8 @@ from DBMS.organization.data_structures import TableConfig, Record
 from DBMS.organization.heap_file import HeapFile
 from DBMS.organization.sequential_file import SequentialIndex
 from DBMS.organization.page_manager import PageManager, IOCounter
-
+from DBMS.logger import ConsoleLogger
+from DBMS.path_utils import resolve_dataset_path, resolve_data_path
 
 from DBMS.indexes.rtree import Rtree
 
@@ -70,10 +71,12 @@ class DatabaseEngine:
         if table_name in self._tables:
             raise ValueError(f"Tabla '{table_name}' ya existe.")
 
+        resolved_csv_path = resolve_dataset_path(csv_path)
+
         io_counter = IOCounter()
 
-        heap_filename  = f"{table_name}.heap"
-        index_filename = f"{table_name}_{pk_col}.idx"
+        heap_filename  = resolve_data_path(f"{table_name}.heap", create_parent=True)
+        index_filename = resolve_data_path(f"{table_name}_{pk_col}.idx", create_parent=True)
 
         heap_pm  = PageManager(heap_filename,  io_counter)
         index_pm = PageManager(index_filename, io_counter)
@@ -94,10 +97,9 @@ class DatabaseEngine:
         
         index.bulk_load_mode = True
 
-        # 1. Cargar CSV y retornar (RID, data_tuple)
-        print(f"  Cargando CSV: {csv_path}...")
-        results = heap.load_from_csv_optimized(csv_path)
-        print(f"  ✓ {len(results)} registros en heap")
+        self.logger.info(f"Cargando CSV '{resolved_csv_path}' en la tabla '{table_name}'...")
+        results = heap.load_from_csv_optimized(resolved_csv_path)
+        self.logger.info(f"{len(results)} registros cargados en heap.")
 
         entry = _TableEntry(heap, index, heap_pm, index_pm, io_counter, config, pk_col, spatial_meta)
         
@@ -169,8 +171,8 @@ class DatabaseEngine:
 
         io_counter = IOCounter()
 
-        heap_filename  = f"{table_name}.heap"
-        index_filename = f"{table_name}_{pk_col}.idx"
+        heap_filename  = resolve_data_path(f"{table_name}.heap", create_parent=True)
+        index_filename = resolve_data_path(f"{table_name}_{pk_col}.idx", create_parent=True)
 
         heap_pm  = PageManager(heap_filename,  io_counter)
         index_pm = PageManager(index_filename, io_counter)
@@ -314,6 +316,16 @@ class DatabaseEngine:
         records = t.heap.get_batch(rids) if rids else []
 
         elapsed = (time.perf_counter() - t0) * 1000
+        self.logger.debug(f"RTREE KNN en '{table_name}': {len(records)} registro(s) | {elapsed:.2f} ms.")
         return QueryResult(records, t.io_counter.snapshot(), elapsed, "RTREE KNN")
-    
-    
+
+    def visualize_rtree(self, table_name: str) -> str:
+        """Genera la visualización del R-Tree asociado a la tabla y devuelve el path del archivo."""
+        t = self._get_table(table_name)
+        if not t.rtree:
+            self.logger.error(f"La tabla '{table_name}' no tiene un R-Tree asociado.")
+            raise Exception(f"La tabla '{table_name}' no tiene un R-Tree asociado.")
+
+        # El método visualize del Rtree devuelve la ruta del PNG
+        path = t.rtree.visualize()
+        return path

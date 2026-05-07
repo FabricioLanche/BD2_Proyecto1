@@ -53,6 +53,7 @@ export default function App() {
   const [datasets, setDatasets] = useState<string[]>([])
   const [logs, setLogs] = useState<string>('')
   const [resultTable, setResultTable] = useState<QueryResultTable | null>(null)
+  const [image, setImage] = useState<string | null>(null)
   const [outputView, setOutputView] = useState<OutputView>('logs')
 
   // Loading states
@@ -276,15 +277,21 @@ export default function App() {
     setStatusMessage('')
     setLogs('')
     setResultTable(null)
+    setImage(null)
     try {
       const queryToExecute = activeTab.selection.trim() || activeTab.query
 
-      const result = await executeQuery(queryToExecute, ({ logs: nextLogs, resultTable: nextResultTable }) => {
+      const result = await executeQuery(queryToExecute, ({ logs: nextLogs, resultTable: nextResultTable, image: nextImage }) => {
         setLogs(nextLogs)
         setResultTable(nextResultTable)
+        setImage(nextImage ?? null)
+        // Si llega una imagen o tabla, cambiar a la vista Results automáticamente
+        if (nextImage || nextResultTable) setOutputView('results')
       })
+
       setLogs(result.logs)
       setResultTable(result.resultTable)
+      setImage(result.image ?? null)
     } catch (error) {
       setLogs('')
       setResultTable(null)
@@ -403,6 +410,7 @@ export default function App() {
       <OutputPanel
         logs={logs}
         resultTable={resultTable}
+        image={image}
         view={outputView}
         onViewChange={setOutputView}
         isRestarting={isRestarting}

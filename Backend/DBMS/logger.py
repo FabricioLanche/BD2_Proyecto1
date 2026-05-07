@@ -18,6 +18,7 @@ class LogLevel(Enum):
   ERROR = "ERROR"
   WARNING = "WARNING"
   DEBUG = "DEBUG"
+  IMAGE = "IMAGE"
   RESULT = "RESULT"
 
 class Logger:
@@ -26,6 +27,10 @@ class Logger:
 
   def result(self, columns: list, rows: list, description: str = ""):
     """Encola un resultado estructurado (tabla) con columnas y filas."""
+    pass
+
+  def image(self, path: str):
+    """Encola una referencia a una imagen generada por el servidor (path local)."""
     pass
 
   def info(self, msg: str):
@@ -48,6 +53,9 @@ class ConsoleLogger(Logger):
     print(f"Columnas: {', '.join(columns)}")
     for row in rows:
       print(f"  {row}")
+
+  def image(self, path: str):
+    print(f"[IMAGE]: {path}")
 
 class QueueLogger(Logger):
   def __init__(self, q=None):
@@ -78,4 +86,12 @@ class QueueLogger(Logger):
         "type": "table",
         "columns": normalized_columns,
         "rows": normalized_rows
+    })
+  
+  def image(self, path: str):
+    # Enviar un mensaje estructurado indicando imagen
+    self.q.put({
+        "level": "IMAGE",
+        "type": "image",
+        "path": path
     })

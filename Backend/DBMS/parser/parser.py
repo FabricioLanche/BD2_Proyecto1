@@ -28,7 +28,21 @@ class SQLParser:
         if t == 'SELECT': return self.select_stmt()
         if t == 'INSERT': return self.insert_stmt()
         if t == 'DELETE': return self.delete_stmt()
+        if t == 'VISUALIZE': return self.visualize_stmt()
         raise SyntaxError(f"Sentencia SQL no reconocida iniciando con: {t}")
+
+    def visualize_stmt(self):
+        # Sintaxis: VISUALIZE RTREE [table_name]
+        self.match('VISUALIZE')
+        tech = self.match('TECH').value.upper()
+        if tech != 'RTREE':
+            raise SyntaxError("Sólo se soporta VISUALIZE RTREE")
+
+        table_name = None
+        if self.current().type == 'ID':
+            table_name = self.match('ID').value
+
+        return {"action": "VISUALIZE", "object": "RTREE", "table": table_name}
 
     def create_stmt(self):
         self.match('CREATE')

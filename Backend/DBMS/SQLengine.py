@@ -2,8 +2,11 @@ from DBMS.parser.scanner import Scanner
 from DBMS.parser.parser import SQLParser
 from DBMS.storage.catalog import SystemCatalog
 from DBMS.organization.data_structures import TableConfig, Record
+from DBMS.logger import ConsoleLogger
+import os
 
-from DBMS.database_engine import DatabaseEngine as StorageEngine
+from DBMS.database_engine import DatabaseEngine
+from DBMS.path_utils import resolve_dataset_path
 
 class DBMSEngine:
     def __init__(self):
@@ -108,13 +111,15 @@ class DBMSEngine:
         elif action == "INSERT": self._execute_insert(ast)
         elif action == "SELECT": self._execute_select(ast)
         elif action == "DELETE": self._execute_delete(ast)
- 
+        elif action == "VISUALIZE": self._execute_visualize(ast)
+
     # --- Lógica Semántica ---
     def _execute_create(self, ast):
         table_name = ast["table"]
-        columns = ast["columns"]
-        filepath = ast["file"]
-        
+        columns    = ast["columns"]
+        filepath   = ast["file"]
+        resolved_filepath = resolve_dataset_path(filepath)
+
         pk_col_name = "id"
         pk_count = 0
         for col in columns:
@@ -169,9 +174,9 @@ class DBMSEngine:
         self._metadata_cache[table_name] = (esquema, table_config, pk_col_name)
 
         if filepath:
-            print(f"\n[EXECUTE] Delegando carga masiva al Storage Engine...")
-            result = self.storage.create_table_from_csv(table_name, table_config, filepath, pk_col_name, spatial_meta)
-            print(f"{result}")
+            self.logger.info(f"Delegando carga masiva desde CSV al Storage Engine para '{table_name}'... ({resolved_filepath})")
+            result = self.storage.create_table_from_csv(table_name, table_config, resolved_filepath, pk_col_name, spatial_meta)
+            self.logger.info(f"{result}")
         else:
              print(f"\n[EXECUTE] Delegando creación física al Storage Engine...")
              self.storage.open_table(table_name, table_config, pk_col_name, spatial_meta)
@@ -372,4 +377,38 @@ class DBMSEngine:
     def _execute_delete(self, ast):
         table_name = ast["table"]
         esquema, table_config, pk_col_name = self._get_table_metadata(table_name)
-        print(f"\n[HOOK] -> Buscar registro en índices y marcar 'is_deleted = 1' en Sequential File.")
+        self.logger.info(f"DELETE en '{table_name}': buscando registro en índices y marcando 'is_deleted = 1' en Sequential File.")
+
+    def _execute_visualize(self, ast):
+        # AST: { action: 'VISUALIZE', object: 'RTREE', table: Optional[str] }
+        obj = ast.get("object")
+        if obj != "RTREE":
+            self.logger.error("VISUALIZE: objeto no soportado")
+            raise Exception("VISUALIZE solo soporta RTREE")
+
+        table_name = ast.get("table")
+        # Si no se especifica tabla, intentar inferir
+        if not table_name:
+            rtrees = [name for name, entry in self.storage._tables.items() if entry.rtree]
+            if len(rtrees) == 1:
+                table_name = rtrees[0]
+            elif len(rtrees) == 0:
+                self.logger.error("No hay R-Trees cargados para visualizar.")
+                raise Exception("No hay R-Trees cargados para visualizar.")
+            else:
+                self.logger.error("Múltiples R-Trees presentes: especifique la tabla. Ej: VISUALIZE RTREE <table>;")
+                raise Exception("Múltiples R-Trees presentes: especifique la tabla. Ej: VISUALIZE RTREE <table>;")
+
+        try:
+            path = self.storage.visualize_rtree(table_name)
+            # Construir URL pública para que el frontend pueda pedir la imagen via HTTP
+            filename = os.path.basename(path)
+            url = f"/api/graph/{filename}"
+            try:
+                self.logger.image(url)
+            except Exception:
+                # Fallback: enviar como tabla con la ruta (compatibilidad)
+                self.logger.result(["image"], [{"image": url}])
+            self.logger.info(f"Visualización R-Tree generada: {path} -> {url}")
+        except Exception as e:
+            self.logger.error(f"Error al visualizar R-Tree para '{table_name}': {e}")

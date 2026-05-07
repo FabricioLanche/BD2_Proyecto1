@@ -28,6 +28,7 @@ class Scanner:
         ('BY', r'BY\b'),
         ('POINT_TYPE', r'POINT\b'), 
         ('RADIUS', r'RADIUS\b'),
+        ('VISUALIZE', r'VISUALIZE\b'),
         ('K', r'K\b'),
         ('INDEX', r'INDEX\b'),
         ('TYPE', r'INT|DOUBLE|VARCHAR'),

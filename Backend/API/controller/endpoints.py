@@ -1,4 +1,5 @@
 from fastapi import File, APIRouter, UploadFile, HTTPException
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 from pathlib import Path
 import shutil
@@ -50,9 +51,17 @@ def ejecutar_query(data: QueryRequest):
             if item.get("type") == "table":
                 # Serializar como JSON para que el frontend lo pueda parsear
                 yield json.dumps(item) + "\n"
+            elif item.get("type") == "image":
+                # Mensaje de imagen: serializar también para que el frontend lo detecte
+                yield json.dumps(item) + "\n"
             else:
-                # Log simple
-                yield f"[{item['level']}]: {item['message']}\n"
+                # Log simple — algunos log items pueden no tener 'message' (p.ej. IMAGE cuando no usado)
+                msg = item.get('message')
+                if msg is None:
+                    # Fallback: serializar el item completo
+                    yield json.dumps(item) + "\n"
+                else:
+                    yield f"[{item['level']}]: {msg}\n"
 
         thread.join()
 
@@ -93,6 +102,14 @@ async def create_dataset(file: UploadFile = File(...)):
 
     return {"message": "Dataset guardado", "path": file_path}
 
+
+@router.get("/graph/{filename}")
+def get_graph(filename: str):
+    graph_dir = ROOT_DIR / "Backend" / "DBMS" / "graphs"
+    file_path = graph_dir / filename
+    if not file_path.exists() or not file_path.resolve().is_file() or graph_dir.resolve() not in file_path.resolve().parents:
+        raise HTTPException(status_code=404, detail="Imagen no encontrada")
+    return FileResponse(str(file_path), media_type="image/png")
 
 @router.delete("/dataset/{filename}")
 async def delete_dataset(filename: str):

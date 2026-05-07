@@ -4,6 +4,7 @@ import operator
 from typing import List, Tuple, Optional, Any
 from .page_manager import PageManager
 from .data_structures import TableConfig, Record
+from DBMS.path_utils import resolve_data_path
 
 
 class HeapFile:
@@ -17,9 +18,9 @@ class HeapFile:
     _PAGE_HEADER_SIZE = struct.calcsize(_PAGE_HEADER_FORMAT)
     
     def __init__(self, filename: str, config: TableConfig, page_manager: Optional[PageManager] = None):
-        self.filename = filename
+        self.filename = resolve_data_path(filename, create_parent=True)
         self.config = config
-        self.pm = page_manager or PageManager(filename)
+        self.pm = page_manager or PageManager(self.filename)
         
         # Calcula cuántos registros caben por página
         usable_space = self.pm.PAGE_SIZE - self._PAGE_HEADER_SIZE

@@ -1,11 +1,12 @@
+from DBMS.path_utils import resolve_data_path, resolve_graph_path
 from dataclasses import dataclass
+import matplotlib
+# Forzar backend no interactivo para evitar dependencias de tkinter en entornos headless
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import struct
 import heapq
 import os
-
-GRAPH_DIR = "Backend/DBMS/graphs"
-FILE_DIR = "Backend/DBMS/data"
 
 @dataclass
 class Page:
@@ -86,8 +87,7 @@ class RtreeFile:
     # MAX_ENTRIES = (PAGE_SIZE - PAGE_HEADER_SIZE) // NODE_ENTRY_SIZE
 
     def __init__(self, filename="RtreeFile.bin"):
-        os.makedirs(FILE_DIR, exist_ok=True)
-        self.FILE_PATH = os.path.join(FILE_DIR, filename)
+        self.FILE_PATH = resolve_data_path(filename, create_parent=True)
         try:
             self.read_file_header()
         except (FileNotFoundError, struct.error):
@@ -640,8 +640,7 @@ class Rtree:
         ax.set_aspect("equal")
         ax.grid(True)
 
-        os.makedirs(GRAPH_DIR, exist_ok=True)
-        path = os.path.join(GRAPH_DIR, "rtree.png")
+        path = resolve_graph_path("rtree.png", create_parent=True)
 
         plt.savefig(path, dpi=200, bbox_inches="tight")
         plt.close()

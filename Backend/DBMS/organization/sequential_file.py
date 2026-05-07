@@ -3,6 +3,7 @@ import os
 import math
 from typing import List, Tuple, Optional
 from .page_manager import PageManager
+from DBMS.path_utils import resolve_data_path
 
 class SequentialIndex:
     # Formato de metadata de página 0:
@@ -11,8 +12,9 @@ class SequentialIndex:
     _METADATA_SIZE = struct.calcsize(_METADATA_FORMAT)
     
     def __init__(self, filename: str, page_manager: Optional[PageManager] = None, pk_format: str='i'):
-        self.filename = filename
-        self.pm = page_manager or PageManager(filename)
+        self.filename = resolve_data_path(filename, create_parent=True)
+        self.pm = page_manager or PageManager(self.filename)
+        self.filename = self.pm.db_filename
             # Formato del nodo del índice: PK, rid_page, rid_slot, next_pos
         self.pk_format = pk_format 
         self.pk_size = struct.calcsize(pk_format)  # Ej: 15
