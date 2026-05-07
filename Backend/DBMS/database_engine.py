@@ -1,9 +1,9 @@
 import time
 from typing import Dict
-from organization.data_structures import TableConfig, Record
-from organization.heap_file import HeapFile
-from organization.sequential_file import SequentialIndex
-from organization.page_manager import PageManager, IOCounter
+from DBMS.organization.data_structures import TableConfig, Record
+from DBMS.organization.heap_file import HeapFile
+from DBMS.organization.sequential_file import SequentialIndex
+from DBMS.organization.page_manager import PageManager, IOCounter
 
 class QueryResult:
     def __init__(self, records, io_stats: dict, elapsed_ms: float, operation: str):
