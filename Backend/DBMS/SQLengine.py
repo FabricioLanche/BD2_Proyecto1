@@ -118,7 +118,7 @@ class DBMSEngine:
         table_name = ast["table"]
         columns    = ast["columns"]
         filepath   = ast["file"]
-        resolved_filepath = resolve_dataset_path(filepath)
+        resolved_filepath = None
 
         pk_col_name = "id"
         pk_count = 0
@@ -174,6 +174,7 @@ class DBMSEngine:
         self._metadata_cache[table_name] = (esquema, table_config, pk_col_name)
 
         if filepath:
+            resolved_filepath = resolve_dataset_path(filepath)
             self.logger.info(f"Delegando carga masiva desde CSV al Storage Engine para '{table_name}'... ({resolved_filepath})")
             result = self.storage.create_table_from_csv(table_name, table_config, resolved_filepath, pk_col_name, spatial_meta)
             self.logger.info(f"{result}")

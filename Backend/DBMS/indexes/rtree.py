@@ -1,7 +1,6 @@
 from DBMS.path_utils import resolve_data_path, resolve_graph_path
 from dataclasses import dataclass
 import matplotlib
-# Forzar backend no interactivo para evitar dependencias de tkinter en entornos headless
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import struct

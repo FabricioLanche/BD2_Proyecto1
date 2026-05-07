@@ -350,7 +350,11 @@ export default function App() {
     try {
       const message = await restartBackend()
       setStatusMessage(message)
+      // Limpiar todos los remanentes de ejecuciones anteriores
+      setLogs('')
       setResultTable(null)
+      setImage(null)
+      setOutputView('logs')
       await loadDatasets()
     } catch (error) {
       setStatusMessage('No se pudo reiniciar el backend.')

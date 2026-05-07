@@ -6,6 +6,10 @@ import shutil
 import os
 import json
 
+from DBMS.logger import QueueLogger
+from DBMS.SQLengine import DBMSEngine
+from DBMS.path_utils import DATA_DIR, DATASETS_DIR, GRAPH_DIR
+
 router = APIRouter()
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
@@ -45,20 +49,13 @@ def ejecutar_query(data: QueryRequest):
             if item is _SENTINEL:
                 break
             
-            # Manejar dos tipos de items:
-            # 1. Log simple: {"level": "...", "message": "..."}
-            # 2. Resultado tabular: {"level": "RESULT", "type": "table", "columns": [...], "rows": [...]}
             if item.get("type") == "table":
-                # Serializar como JSON para que el frontend lo pueda parsear
                 yield json.dumps(item) + "\n"
             elif item.get("type") == "image":
-                # Mensaje de imagen: serializar también para que el frontend lo detecte
                 yield json.dumps(item) + "\n"
             else:
-                # Log simple — algunos log items pueden no tener 'message' (p.ej. IMAGE cuando no usado)
                 msg = item.get('message')
                 if msg is None:
-                    # Fallback: serializar el item completo
                     yield json.dumps(item) + "\n"
                 else:
                     yield f"[{item['level']}]: {msg}\n"
@@ -124,7 +121,14 @@ async def delete_dataset(filename: str):
 
 @router.post("/restart")
 async def restart():
-    if os.path.exists(UPLOAD_DIR):
-        shutil.rmtree(UPLOAD_DIR)
-
-    return {"message": "Datasets eliminados"}
+    global ENGINE
+    
+    for directory in [DATA_DIR, DATASETS_DIR, GRAPH_DIR]:
+        dir_path = Path(directory)
+        if dir_path.exists():
+            shutil.rmtree(dir_path)
+    
+    with ENGINE_LOCK:
+        ENGINE = DBMSEngine()
+    
+    return {"message": "Sistema reiniciado: directorios eliminados y engine reiniciado"}
