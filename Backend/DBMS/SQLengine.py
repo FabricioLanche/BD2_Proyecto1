@@ -280,6 +280,8 @@ class DBMSEngine:
 
         if tipo_columna == "POINT" and search_type in ["SEARCH", "RANGE"]:
             raise Exception(f"Error Semántico: No se puede usar '=' o 'BETWEEN' en la columna espacial '{col_name}'. Usar 'IN (POINT(x, y)...)'.")
+        if tipo_columna != "POINT" and search_type in ["RTREE_RADIUS", "RTREE_KNN"]:
+            raise Exception(f"Error Semántico: La columna '{col_name}' es de tipo {tipo_columna}. Solo puedes usar 'IN (POINT...)' en columnas de tipo POINT.")
 
         if es_llave_primaria and tech == "SEQUENTIAL":
             if search_type == "SEARCH":
