@@ -201,7 +201,7 @@ class ExtendibleHashing:
             
         self.last_execution_time_ms = (time.perf_counter() - start) * 1000
 
-    def remove(self, key) -> List[Tuple[int, int]]:
+    def remove(self, key, target_rid=None) -> List[Tuple[int, int]]:
         start = time.perf_counter()
         #elimina una entrada del índice y retorna el RID
         idx = self._get_hash_bits(key, self.global_depth)
@@ -213,7 +213,7 @@ class ExtendibleHashing:
         new_records = []
         
         for k, r in records:
-            if k == key:
+            if k == key and (target_rid is None or r == target_rid):
                 rids_to_delete.append(r)  #guarda (page_id, slot_id), si duplicado guarda en lista
             else:
                 new_records.append((k, r))

@@ -8,6 +8,7 @@ from DBMS.organization.page_manager import PageManager, IOCounter
 
 from DBMS.indexes.rtree import Rtree
 from DBMS.indexes.extendible_hashing import ExtendibleHashing
+from DBMS.indexes.b_plus_tree import BPlusTree
 
 
 class QueryResult:
@@ -41,6 +42,7 @@ class _TableEntry:
         pk_col: str,
         spatial_meta: dict,
         hash_meta:list,
+        btree_meta:list,
     ):
         self.heap       = heap
         self.index      = index
@@ -55,6 +57,8 @@ class _TableEntry:
         self.rtree = None
         self.hash_meta = hash_meta or []
         self.hash_indices = {}
+        self.btree_meta = btree_meta or []
+        self.btree_indices = {}
 
 
 
@@ -71,6 +75,7 @@ class DatabaseEngine:
         pk_col: str,
         spatial_meta: dict,
         hash_meta: list,
+        btree_meta: list
     ) -> QueryResult:
         # Crea la tabla, carga el CSV en el HeapFile y construye el índice
         # Para las cargas masivas se deshabilita reconstrucciones y se hace batch indexing
@@ -105,23 +110,22 @@ class DatabaseEngine:
         # 1. Cargar CSV y retornar (RID, data_tuple)
         print(f"  Cargando CSV: {csv_path}...")
         results = heap.load_from_csv_optimized(csv_path)
-        print(f"  ✓ {len(results)} registros en heap")
+        print(f"  {len(results)} registros en heap")
 
-        entry = _TableEntry(heap, index, heap_pm, index_pm, io_counter, config, pk_col, spatial_meta, hash_meta)
+        entry = _TableEntry(heap, index, heap_pm, index_pm, io_counter, config, pk_col, spatial_meta, hash_meta, btree_meta)
         
         for meta in hash_meta:
             col_name = meta["nombre"]
             hash_pm = PageManager(f"{table_name}_{col_name}.hash", io_counter)
 
-            # el Extendible Hashing esperaba el pk mediante el Tableconfig así que voy 
-            # a engañarle para que use el de la columna que esta indexando
-            original_pk_index = config.pk_index
-            config.pk_index = config.column_map[col_name]
+            entry.hash_indices[col_name] = ExtendibleHashing(hash_pm, config, col_name)
 
-            entry.hash_indices[col_name] = ExtendibleHashing(hash_pm, config)
-
-            config.pk_index = original_pk_index
-            #TODO: quitar el engaño de pk y en su lugar modificar el Extendible Hashing
+        for meta in btree_meta:
+            col_name = meta["nombre"]
+            btree_pm = PageManager(f"{table_name}_{col_name}.btree", io_counter)
+            
+            key_fmt = config.get_column_format(col_name)
+            entry.btree_indices[col_name] = BPlusTree(f"{table_name}_{col_name}.btree", btree_pm, key_format=key_fmt)   
 
 
         idx_x, idx_y = -1, -1
@@ -144,6 +148,13 @@ class DatabaseEngine:
                 col_idx = config.column_map[col_name]
                 val = data_tuple[col_idx]
                 h_index.add(val, rid)
+
+            for col_name, b_index in entry.btree_indices.items():
+                col_idx = config.column_map[col_name]
+                val = data_tuple[col_idx]
+                if isinstance(val, bytes):
+                    val = val.decode('utf-8', errors='ignore').rstrip('\x00')
+                b_index.insert(val, rid)
 
             if entry.rtree:
                 point = (data_tuple[idx_x], data_tuple[idx_y])
@@ -193,6 +204,7 @@ class DatabaseEngine:
         pk_col: str,
         spatial_meta: dict = None,
         hash_meta: list = None,
+        btree_meta: list = None,
     ) -> None:
         # Abre una tabla que ya existe en disco (sin cargar CSV).
 
@@ -213,7 +225,7 @@ class DatabaseEngine:
 
 
         self._tables[table_name] = _TableEntry(
-            heap, index, heap_pm, index_pm, io_counter, config, pk_col, spatial_meta, hash_meta)
+            heap, index, heap_pm, index_pm, io_counter, config, pk_col, spatial_meta, hash_meta, btree_meta)
 
         self._tables[table_name].hash_indices = {}
 
@@ -221,15 +233,16 @@ class DatabaseEngine:
         if hash_meta:
             for meta in hash_meta:
                 col_name = meta["nombre"]
-                hash_filename = f"{table_name}_{col_name}.hash"
-                h_pm = PageManager(hash_filename, io_counter)
+                h_pm = PageManager(f"{table_name}_{col_name}.hash", io_counter)
+                self._tables[table_name].hash_indices[col_name] = ExtendibleHashing(h_pm, config, col_name)
 
-                original_pk_index = config.pk_index
-                config.pk_index = config.column_map[col_name]
 
-                self._tables[table_name].hash_indices[col_name] = ExtendibleHashing(h_pm, config)
-
-                config.pk_index = original_pk_index
+        if btree_meta:
+            for meta in btree_meta:
+                col_name = meta["nombre"]
+                btree_pm = PageManager(f"{table_name}_{col_name}.btree", io_counter)
+                key_fmt = config.get_column_format(col_name)
+                self._tables[table_name].btree_indices[col_name] = BPlusTree(f"{table_name}_{col_name}.btree", btree_pm, key_format=key_fmt)
 
         if spatial_meta:
             rtree_filename = f"{table_name}_spatial.bin"
@@ -243,11 +256,26 @@ class DatabaseEngine:
         self._reset_io(t)
 
         rid = t.heap.insert(record)
-        t.index.add(record.get_pk(), rid)
+
+        pk_idx = t.config.column_map[t.pk_col]
+        pk_val = record.data_tuple[pk_idx]
+        if isinstance(pk_val, bytes):
+            pk_val = pk_val.decode('utf-8', errors='ignore').rstrip('\x00')
+        t.index.add(pk_val, rid)
 
         for col_name, h_index in t.hash_indices.items():
-            val = record.get_attribute(col_name)
+            col_idx = t.config.column_map[col_name]
+            val = record.data_tuple[col_idx]
+            if isinstance(val, bytes):
+                val = val.decode('utf-8', errors='ignore').rstrip('\x00')
             h_index.add(val, rid)
+
+        for col_name, b_index in t.btree_indices.items():
+            col_idx = t.config.column_map[col_name]
+            val = record.data_tuple[col_idx]
+            if isinstance(val, bytes):
+                val = val.decode('utf-8', errors='ignore').rstrip('\x00')
+            b_index.insert(val, rid)
 
         if t.rtree:
             idx_x = t.config.column_map[t.spatial_meta["col_x"]]
@@ -275,7 +303,7 @@ class DatabaseEngine:
         self._reset_io(t)
 
         rids    = t.index.range_search_rids(pk_start, pk_end)
-        records = t.heap.get_batch(rids) if rids else []
+        records = [t.heap.search(rid) for rid in rids] if rids else []
 
         elapsed = (time.perf_counter() - t0) * 1000
         return QueryResult(records, t.io_counter.snapshot(), elapsed, "SELECT RANGE")
@@ -292,12 +320,18 @@ class DatabaseEngine:
         record = t.heap.search(rid)
 
         for col_name, h_index in t.hash_indices.items():
-            val = record.get_attribute(col_name)
-
+            col_idx = t.config.column_map[col_name]
+            val = record.data_tuple[col_idx]
             if isinstance(val, bytes):
                 val = val.decode('utf-8', errors='ignore').rstrip('\x00')
-                
-            h_index.remove(val)
+            h_index.remove(val, rid)
+
+        for col_name, b_index in t.btree_indices.items():
+            col_idx = t.config.column_map[col_name]
+            val = record.data_tuple[col_idx]
+            if isinstance(val, bytes):
+                val = val.decode('utf-8', errors='ignore').rstrip('\x00')
+            b_index.remove(val, rid)
 
         if t.rtree:
             idx_x = t.config.column_map[t.spatial_meta["col_x"]]
@@ -375,7 +409,7 @@ class DatabaseEngine:
         rids = [res[1] for res in rtree_results]
         
         # traemos datos crudos desde el disco
-        records = t.heap.get_batch(rids) if rids else []
+        records = [t.heap.search(rid) for rid in rids] if rids else []
 
         elapsed = (time.perf_counter() - t0) * 1000
         return QueryResult(records, t.io_counter.snapshot(), elapsed, "RTREE RADIUS")
@@ -388,7 +422,7 @@ class DatabaseEngine:
         rtree_results = t.rtree.knnSearch((x, y), k)
         
         rids = [res[1] for res in rtree_results]
-        records = t.heap.get_batch(rids) if rids else []
+        records = [t.heap.search(rid) for rid in rids] if rids else []
 
         elapsed = (time.perf_counter() - t0) * 1000
         return QueryResult(records, t.io_counter.snapshot(), elapsed, "RTREE KNN")
@@ -399,8 +433,46 @@ class DatabaseEngine:
         self._reset_io(t)
 
         h_index = t.hash_indices[col_name]
-        rid = h_index.search_rid(val)
-        record = t.heap.search(rid) if rid else None
+        rids = h_index.search_rid(val)
+        records = [t.heap.search(rid) for rid in rids] if rids else []
 
         elapsed = (time.perf_counter() - t0) * 1000
-        return QueryResult(record, t.io_counter.snapshot(), elapsed, "HASH SEARCH")    
+        return QueryResult(records, t.io_counter.snapshot(), elapsed, "HASH SEARCH")    
+
+
+    def search_btree(self, table_name: str, col_name: str, val) -> QueryResult:
+        t = self._get_table(table_name)
+        t0 = time.perf_counter()
+        self._reset_io(t)
+
+        b_index = t.btree_indices[col_name]
+        rids = b_index.search(val)
+        
+        records = [t.heap.search(rid) for rid in rids] if rids else []
+        elapsed = (time.perf_counter() - t0) * 1000
+        return QueryResult(records, t.io_counter.snapshot(), elapsed, "BTREE SEARCH")
+
+    def range_search_btree(self, table_name: str, col_name: str, v1, v2) -> QueryResult:
+        t = self._get_table(table_name)
+        t0 = time.perf_counter()
+        self._reset_io(t)
+
+        b_index = t.btree_indices[col_name]
+        results = b_index.range_search(v1, v2)
+
+        rids = [res[1] for res in results] if results else []
+        records = [t.heap.search(rid) for rid in rids] if rids else []
+        
+        elapsed = (time.perf_counter() - t0) * 1000
+        return QueryResult(records, t.io_counter.snapshot(), elapsed, "BTREE RANGE")
+    
+    def filter_scan(self, table_name: str, col_name: str, op: str, val) -> QueryResult:
+        """Realiza un Full Table Scan con filtros, midiendo I/O y tiempo."""
+        t = self._get_table(table_name)
+        t0 = time.perf_counter()
+        self._reset_io(t)
+
+        records = t.heap.filter_records(col_name, op, val)
+
+        elapsed = (time.perf_counter() - t0) * 1000
+        return QueryResult(records, t.io_counter.snapshot(), elapsed, "FULL TABLE SCAN")

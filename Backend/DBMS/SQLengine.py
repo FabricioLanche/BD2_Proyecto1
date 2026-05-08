@@ -56,9 +56,12 @@ class DBMSEngine:
         spatial_meta = None
         columnas_fisicas = []
         hash_meta = []
+        btree_meta = []
         for col in esquema:
             if col.get("index_tech") == "HASH":
                 hash_meta.append({"nombre": col["nombre"], "tipo": col["tipo"]})
+            if col.get("index_tech") == "BTREE":
+                btree_meta.append({"nombre": col["nombre"], "tipo": col["tipo"]})
             if col["tipo"] == "POINT":
                 # Usa el Mapeo o el Default (_x, _y)
                 if col.get("mapped_by"):
@@ -80,7 +83,7 @@ class DBMSEngine:
         
         table_config = TableConfig(formato_binario, nombres_columnas, pk_col_name)
         
-        self.storage.open_table(table_name, table_config, pk_col_name, spatial_meta, hash_meta)
+        self.storage.open_table(table_name, table_config, pk_col_name, spatial_meta, hash_meta, btree_meta)
 
         meta = (esquema, table_config, pk_col_name)
         self._metadata_cache[table_name] = meta
@@ -117,11 +120,21 @@ class DBMSEngine:
         table_name = ast["table"]
         columns = ast["columns"]
         filepath = ast["file"]
+
+        esquema_existente = None
+        try:
+            esquema_existente = self.catalog.get_table_schema(table_name)
+        except Exception:
+            pass
+
+        if esquema_existente:
+            raise Exception(f"Error Semántico: La tabla '{table_name}' ya existe.")
         
         pk_col_name = "id"
         pk_count = 0
         rtree_count = 0
         hash_meta = []
+        btree_meta = []
         for col in columns:
             if col.get("primary_key"):
                 pk_count += 1
@@ -143,6 +156,10 @@ class DBMSEngine:
                     if tipo == "POINT":
                         raise Exception(f"Error Semántico: La técnica HASH no es compatible con el tipo POINT. Use RTREE para columnas espaciales.")
                     hash_meta.append(col)
+                elif tech == "BTREE":
+                    if tipo == "POINT":
+                        raise Exception(f"Error Semántico: La técnica BTREE no es compatible con el tipo POINT.")
+                    btree_meta.append(col)
                 elif tech == "RTREE":
                     rtree_count += 1
                     if tipo != "POINT":
@@ -188,11 +205,11 @@ class DBMSEngine:
 
         if filepath:
             print(f"\n[EXECUTE] Delegando carga masiva al Storage Engine...")
-            result = self.storage.create_table_from_csv(table_name, table_config, filepath, pk_col_name, spatial_meta, hash_meta)
+            result = self.storage.create_table_from_csv(table_name, table_config, filepath, pk_col_name, spatial_meta, hash_meta, btree_meta)
             print(f"{result}")
         else:
              print(f"\n[EXECUTE] Delegando creación física al Storage Engine...")
-             self.storage.open_table(table_name, table_config, pk_col_name, spatial_meta, hash_meta)
+             self.storage.open_table(table_name, table_config, pk_col_name, spatial_meta, hash_meta, btree_meta)
              print(f" [CREATE] tabla '{table_name}' creada.")
 
 
@@ -321,8 +338,40 @@ class DBMSEngine:
                     
         # OTROS ÍNDICES 
         elif tech == "BTREE":
-            print(f"\n[HOOK] Ejecutando Index Scan usando B-Tree para la columna '{col_name}'.")
-            
+            if search_type == "SEARCH":
+                val = ast["val"]
+                if tipo_columna == "INT": val = int(val)
+                elif tipo_columna == "DOUBLE": val = float(val)
+                elif isinstance(val, str): val = val.strip("'\"")
+
+                print(f"\n[EXECUTE] Index Scan: Usando B+ Tree exacto en '{col_name}'...")
+                result = self.storage.search_btree(table_name, col_name, val)
+
+                print(f"{result}")
+                if result.records:
+                     print(f"   -> Registros Encontrados ({len(result.records)}):")
+                     for r in result.records:
+                         print(f"      * {self._clean_tuple(r.data_tuple, esquema)}")
+                else:
+                     print("   -> 0 registros encontrados.")
+
+            elif search_type == "RANGE":
+                v1, v2 = ast["range"]
+                if tipo_columna == "INT": v1, v2 = int(v1), int(v2)
+                elif tipo_columna == "DOUBLE": v1, v2 = float(v1), float(v2)
+                elif isinstance(v1, str) and isinstance(v2, str):
+                    v1, v2 = v1.strip("'\""), v2.strip("'\"")
+
+                print(f"\n[EXECUTE] Index Scan: Rango B+ Tree en '{col_name}'...")
+                result = self.storage.range_search_btree(table_name, col_name, v1, v2)
+                
+                print(f"{result}")
+                if result.records:
+                    print(f"   -> Registros en el rango ({len(result.records)}):")
+                    for r in result.records:
+                        print(f"      * {self._clean_tuple(r.data_tuple, esquema)}")
+                else:
+                    print("   -> 0 registros encontrados.")
         
         elif tech == "HASH":
             if search_type == "SEARCH":
@@ -336,8 +385,12 @@ class DBMSEngine:
 
                 print(f"\n[EXECUTE] Index Scan: Usando Hashing Extendible en '{col_name}'...")
                 result = self.storage.search_hash(table_name, col_name, val)
+
+                print(f"{result}")
                 if result.records:
-                     print(f"   -> Registro Encontrado: {self._clean_tuple(result.records.data_tuple, esquema)}")
+                     print(f"   -> Registros Encontrados ({len(result.records)}):")
+                     for r in result.records:
+                         print(f"      * {self._clean_tuple(r.data_tuple, esquema)}")
                 else:
                      print("   -> 0 registros encontrados.")
             else:
@@ -390,13 +443,16 @@ class DBMSEngine:
                 val = (v1, v2)
             
             try:
-                tabla = self.storage._tables[table_name]
-                resultados = tabla.heap.filter_records(col_name, op, val)
+                print(f"\n[EXECUTE] Iniciando Full Table Scan secuencial en '{col_name}'...")
+                result = self.storage.filter_scan(table_name, col_name, op, val)
+                print(f"{result}")
                 
-                print(f"Full Table Scan completado.")
-                print(f"   -> Registros que cumplen la condición ({len(resultados)}):")
-                for r in resultados:
-                    print(f"      * {self._clean_tuple(r.data_tuple, esquema)}")
+                if result.records:
+                    print(f"   -> Registros que cumplen la condición ({len(result.records)}):")
+                    for r in result.records:
+                        print(f"      * {self._clean_tuple(r.data_tuple, esquema)}")
+                else:
+                    print("   -> 0 registros encontrados.")
             except Exception as e:
                 print(f"[ERROR] Fallo en el escaneo: {e}")
 
@@ -415,6 +471,9 @@ class DBMSEngine:
         tipo_columna = col_meta["tipo"]
         tech = col_meta.get("index_tech")
 
+        if tipo_columna == "POINT":
+            raise Exception("Error Semántico: El motor no soporta eliminar registros filtrando directamente por coordenadas (POINT). Usa la Llave Primaria u otra columna.")
+
         if tipo_columna == "INT": val = int(val)
         elif tipo_columna == "DOUBLE": val = float(val)
         elif isinstance(val, str): val = val.strip("'\"")
@@ -423,6 +482,7 @@ class DBMSEngine:
 
         if col_name == pk_col_name:
             result = self.storage.delete(table_name, val)
+            print(f"{result}")
             if result.records:
                 print(f"   Registro con PK '{val}' eliminado exitosamente.")
             else:
@@ -432,16 +492,44 @@ class DBMSEngine:
         if tech == "HASH":
             print(f"   Usando índice HASH en '{col_name}' para localizar el registro...")
             search_result = self.storage.search_hash(table_name, col_name, val)
-            
+            print(f"{search_result} - Info de búsqueda en HASH")
             if search_result.records:
-                pk_val = search_result.records.get_pk()
+                eliminados = 0
 
-                if isinstance(pk_val, bytes):
-                    pk_val = pk_val.decode('utf-8', errors='ignore').rstrip('\x00')
+                for r in search_result.records:
+                    pk_val = r.get_pk()
 
-                del_result = self.storage.delete(table_name, pk_val)
-                if del_result.records:
-                    print(f"   Registro localizado por HASH y eliminado en cascada exitosamente.")
+                    if isinstance(pk_val, bytes):
+                        pk_val = pk_val.decode('utf-8', errors='ignore').rstrip('\x00')
+                    
+                    del_result = self.storage.delete(table_name, pk_val)
+                    print(f" {del_result} - Info de eliminación en HASH")
+                    if del_result.records:
+                        eliminados += 1
+
+                print(f"   {eliminados} registro(s) localizado(s) por HASH y eliminado(s).")
+
+            else:
+                print(f"   -> No se encontraron registros donde {col_name} = {val}.")
+            return
+        
+        elif tech == "BTREE":
+            print(f"   Usando índice BTREE en '{col_name}' para localizar registros a borrar...")
+            search_result = self.storage.search_btree(table_name, col_name, val)
+            print(f"{search_result} - Info de búsqueda en BTREE")
+            if search_result.records:
+                eliminados = 0
+                for r in search_result.records:
+                    pk_val = r.get_pk()
+                    if isinstance(pk_val, bytes):
+                        pk_val = pk_val.decode('utf-8', errors='ignore').rstrip('\x00')
+                    
+                    del_result = self.storage.delete(table_name, pk_val)
+                    print(f" {del_result} - Info de eliminación en BTREE")
+                    if del_result.records:
+                        eliminados += 1
+
+                print(f"   {eliminados} registro(s) localizado(s) por BTREE y eliminado(s).")
             else:
                 print(f"   -> No se encontraron registros donde {col_name} = {val}.")
             return
@@ -450,8 +538,8 @@ class DBMSEngine:
 
         
         try:
-            tabla = self.storage._tables[table_name]
-            resultados = tabla.heap.filter_records(col_name, "=", val)
+            resultados = self.storage.filter_scan(table_name, col_name, "=", val)
+            print(f"{resultados} - Info de búsqueda para DELETE con Full Table Scan")
             
             if not resultados:
                 print(f"   -> No se encontraron registros donde {col_name} = {val}.")
@@ -465,6 +553,7 @@ class DBMSEngine:
                     pk_val = pk_val.decode('utf-8', errors='ignore').rstrip('\x00')
 
                 res = self.storage.delete(table_name, pk_val)
+                print(f"{res}")
                 if res.records:
                     eliminados += 1
                     
