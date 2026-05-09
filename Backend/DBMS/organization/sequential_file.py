@@ -3,7 +3,7 @@ import os
 import math
 from typing import List, Tuple, Optional
 from .page_manager import PageManager
-from DBMS.path_utils import resolve_data_path
+from Backend.DBMS.utils.path_utils import resolve_data_path
 
 class SequentialIndex:
     # Formato de metadata de página 0:

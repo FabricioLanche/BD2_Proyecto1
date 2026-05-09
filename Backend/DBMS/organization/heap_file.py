@@ -4,7 +4,7 @@ import operator
 from typing import List, Tuple, Optional, Any
 from .page_manager import PageManager
 from .data_structures import TableConfig, Record
-from DBMS.path_utils import resolve_data_path
+from Backend.DBMS.utils.path_utils import resolve_data_path
 
 
 class HeapFile:

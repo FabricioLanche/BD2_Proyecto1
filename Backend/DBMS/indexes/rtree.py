@@ -1,4 +1,4 @@
-from DBMS.path_utils import resolve_data_path, resolve_graph_path
+from Backend.DBMS.utils.path_utils import resolve_data_path, resolve_graph_path
 from dataclasses import dataclass
 import matplotlib
 matplotlib.use('Agg')

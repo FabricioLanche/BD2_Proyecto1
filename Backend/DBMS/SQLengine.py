@@ -2,11 +2,11 @@ from DBMS.parser.scanner import Scanner
 from DBMS.parser.parser import SQLParser
 from DBMS.storage.catalog import SystemCatalog
 from DBMS.organization.data_structures import TableConfig, Record
-from DBMS.logger import ConsoleLogger
+from Backend.DBMS.utils.logger import ConsoleLogger
 import os
 
 from DBMS.database_engine import DatabaseEngine
-from DBMS.path_utils import resolve_dataset_path
+from Backend.DBMS.utils.path_utils import resolve_dataset_path
 
 class DBMSEngine:
     def __init__(self, logger=None):

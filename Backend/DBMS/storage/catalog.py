@@ -2,7 +2,7 @@ import json
 import math
 import os
 from DBMS.organization.page_manager import PageManager
-from DBMS.path_utils import resolve_data_path
+from Backend.DBMS.utils.path_utils import resolve_data_path
 
 class SystemCatalog:
     def __init__(self, filename="system_catalog.dat"):

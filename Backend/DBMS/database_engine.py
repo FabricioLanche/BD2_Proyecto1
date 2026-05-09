@@ -4,8 +4,8 @@ from DBMS.organization.data_structures import TableConfig, Record
 from DBMS.organization.heap_file import HeapFile
 from DBMS.organization.sequential_file import SequentialIndex
 from DBMS.organization.page_manager import PageManager, IOCounter
-from DBMS.logger import ConsoleLogger
-from DBMS.path_utils import resolve_dataset_path, resolve_data_path
+from Backend.DBMS.utils.logger import ConsoleLogger
+from Backend.DBMS.utils.path_utils import resolve_dataset_path, resolve_data_path
 
 from DBMS.indexes.rtree import Rtree
 
