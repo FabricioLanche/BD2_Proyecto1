@@ -3,6 +3,8 @@ from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 from pathlib import Path
 import shutil
+import threading
+import queue
 import os
 import json
 
@@ -14,6 +16,9 @@ router = APIRouter()
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
 UPLOAD_DIR = ROOT_DIR / "Backend" / "DBMS" / "datasets"
+
+ENGINE = DBMSEngine()
+ENGINE_LOCK = threading.Lock()
 
 class QueryRequest(BaseModel):
     query: str
@@ -73,30 +78,24 @@ async def list_datasets():
         for file in os.listdir(UPLOAD_DIR)
         if file.endswith(".csv") and os.path.isfile(os.path.join(UPLOAD_DIR, file))
     ]
-
     return {"datasets": archivos}
 
 def get_unique_filename(directory, filename):
     name, ext = os.path.splitext(filename)
     counter = 2
-
     new_filename = filename
     while os.path.exists(os.path.join(directory, new_filename)):
         new_filename = f"{name}({counter}){ext}"
         counter += 1
-
     return new_filename
 
 @router.post("/dataset")
 async def create_dataset(file: UploadFile = File(...)):
     os.makedirs(UPLOAD_DIR, exist_ok=True)
-
     unique_name = get_unique_filename(UPLOAD_DIR, file.filename)
     file_path = os.path.join(UPLOAD_DIR, unique_name)
-
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-
     return {"message": "Dataset guardado", "path": file_path}
 
 
@@ -111,12 +110,9 @@ def get_graph(filename: str):
 @router.delete("/dataset/{filename}")
 async def delete_dataset(filename: str):
     file_path = UPLOAD_DIR / filename
-
     if not file_path.resolve().is_file() or UPLOAD_DIR.resolve() not in file_path.resolve().parents:
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
-
     file_path.unlink()
-
     return {"message": f"{filename} eliminado"}
 
 @router.post("/restart")

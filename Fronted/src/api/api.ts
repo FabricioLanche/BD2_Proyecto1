@@ -1,12 +1,13 @@
 import axios, { type AxiosProgressEvent } from 'axios'
 
-export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL,
-})
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '/api').trim() || '/api'
+const NORMALIZED_API_BASE_URL = API_BASE_URL.endsWith('/')
+  ? API_BASE_URL.slice(0, -1)
+  : API_BASE_URL
 
-type QueryResponse = {
-  result?: string
-}
+export const api = axios.create({
+  baseURL: NORMALIZED_API_BASE_URL,
+})
 
 type DatasetsResponse = {
   datasets?: string[]
