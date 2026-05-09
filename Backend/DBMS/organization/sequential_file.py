@@ -12,16 +12,10 @@ class SequentialIndex:
     _METADATA_SIZE = struct.calcsize(_METADATA_FORMAT)
     
     def __init__(self, filename: str, page_manager: Optional[PageManager] = None, pk_format: str='i'):
-<<<<<<< HEAD
         self.filename = resolve_data_path(filename, create_parent=True)
         self.pm = page_manager or PageManager(self.filename)
         self.filename = self.pm.db_filename
-            # Formato del nodo del índice: PK, rid_page, rid_slot, next_pos
-=======
-        self.filename = filename
-        self.pm = page_manager or PageManager(filename)
         # Formato del nodo del índice: PK, rid_page, rid_slot, next_pos
->>>>>>> 7e811a09b132b489759ab148eb1dc17de91559b8
         self.pk_format = pk_format 
         self.pk_size = struct.calcsize(pk_format) 
         self.pk_is_str = pk_format.endswith('s')

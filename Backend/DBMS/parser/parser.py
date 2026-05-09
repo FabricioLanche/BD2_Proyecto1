@@ -29,6 +29,7 @@ class SQLParser:
         if t == 'INSERT': return self.insert_stmt()
         if t == 'DELETE': return self.delete_stmt()
         if t == 'VISUALIZE': return self.visualize_stmt()
+        if t == 'PAGESIZE': return self.pagesize_stmt()
         raise SyntaxError(f"Sentencia SQL no reconocida iniciando con: {t}")
 
     def visualize_stmt(self):
@@ -43,6 +44,14 @@ class SQLParser:
             table_name = self.match('ID').value
 
         return {"action": "VISUALIZE", "object": "RTREE", "table": table_name}
+
+    def pagesize_stmt(self):
+        # Sintaxis simple: PAGESIZE <NUM>
+        self.match('PAGESIZE')
+        if self.current().type != 'NUM':
+            raise SyntaxError('Se esperaba un número para PAGESIZE')
+        size_token = self.match('NUM')
+        return {"action": "SET_PAGESIZE", "size": int(float(size_token.value))}
 
     def create_stmt(self):
         self.match('CREATE')

@@ -9,7 +9,7 @@ import os
 import json
 
 from Backend.DBMS.utils.logger import QueueLogger
-from DBMS.SQLengine import DBMSEngine
+from Backend.DBMS.SQLengine import DBMSEngine
 from Backend.DBMS.utils.path_utils import DATA_DIR, DATASETS_DIR, GRAPH_DIR
 
 router = APIRouter()

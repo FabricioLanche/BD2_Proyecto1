@@ -1,13 +1,14 @@
 import os
 
-from DBMS.parser.scanner import Scanner
-from DBMS.parser.parser import SQLParser
-from DBMS.storage.catalog import SystemCatalog
-from DBMS.organization.data_structures import TableConfig, Record
+from Backend.DBMS.parser.scanner import Scanner
+from Backend.DBMS.parser.parser import SQLParser
+from Backend.DBMS.storage.catalog import SystemCatalog
+from Backend.DBMS.organization.data_structures import TableConfig, Record
 from Backend.DBMS.utils.logger import ConsoleLogger
 from Backend.DBMS.utils.path_utils import resolve_dataset_path
 
-from DBMS.database_engine import DatabaseEngine
+from Backend.DBMS.database_engine import DatabaseEngine
+from Backend.DBMS.config import set_index_page_size, get_index_page_size
 
 
 class DBMSEngine:
@@ -128,6 +129,13 @@ class DBMSEngine:
             self._execute_delete(ast)
         elif action == "VISUALIZE":
             self._execute_visualize(ast)
+        elif action == "SET_PAGESIZE":
+            size = ast.get("size")
+            try:
+                set_index_page_size(size)
+                self.logger.info(f"Tamaño de página de índices ajustado a {get_index_page_size()}")
+            except Exception as e:
+                self.logger.error(f"Error al aplicar PAGESIZE: {e}")
 
     def _execute_create(self, ast):
         table_name = ast["table"]
@@ -166,9 +174,9 @@ class DBMSEngine:
                     if not col.get("primary_key"):
                         self.logger.error(f"Error Semántico: SEQUENTIAL solo está soportado para PRIMARY KEY. '{col['nombre']}' no es PK.")
                         raise Exception(f"Error Semántico: El índice SEQUENTIAL solo está soportado para la PRIMARY KEY. La columna '{col['nombre']}' no es PK.")
-                    if tipo not in ["INT", "DOUBLE"]:
-                        self.logger.error(f"Error Semántico: SEQUENTIAL solo soporta columnas numéricas. '{col['nombre']}' es {tipo}.")
-                        raise Exception(f"Error Semántico: SEQUENTIAL solo soporta columnas numéricas. La columna '{col['nombre']}' es {tipo}.")
+                    if tipo not in ["INT", "DOUBLE"] and not tipo.startswith("VARCHAR"):
+                        self.logger.error(f"Error Semántico: SEQUENTIAL solo soporta columnas numéricas o VARCHAR. '{col['nombre']}' es {tipo}.")
+                        raise Exception(f"Error Semántico: SEQUENTIAL solo soporta columnas numéricas o VARCHAR. La columna '{col['nombre']}' es {tipo}.")
                 elif tech == "HASH":
                     if tipo == "POINT":
                         raise Exception("Error Semántico: La técnica HASH no es compatible con el tipo POINT. Use RTREE para columnas espaciales.")

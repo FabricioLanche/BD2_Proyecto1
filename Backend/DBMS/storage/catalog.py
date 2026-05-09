@@ -1,7 +1,7 @@
 import json
 import math
 import os
-from DBMS.organization.page_manager import PageManager
+from Backend.DBMS.organization.page_manager import PageManager
 from Backend.DBMS.utils.path_utils import resolve_data_path
 
 class SystemCatalog:

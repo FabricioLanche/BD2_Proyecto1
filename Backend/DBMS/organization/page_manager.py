@@ -1,9 +1,13 @@
    #Capa 1: Acceso a Disco
 import os
+from Backend.DBMS.config import get_index_page_size
 
 class PageManager:
-    def __init__(self, db_filename, io_counter=None, page_size=4096):
+    def __init__(self, db_filename, io_counter=None, page_size=None):
         self.db_filename = db_filename
+        # Si no se especifica, tomar tamaño desde la configuración central
+        if page_size is None:
+            page_size = get_index_page_size()
         self.PAGE_SIZE = page_size  # Tamaño de página configurable
         self.read_count = 0
         self.write_count = 0

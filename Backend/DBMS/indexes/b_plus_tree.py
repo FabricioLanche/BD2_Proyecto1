@@ -1,7 +1,9 @@
 import struct
+import math
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Any
 from bisect import bisect_right, bisect_left
+from Backend.DBMS.config import get_index_page_size
 
 @dataclass
 class BPlusHeader:
@@ -50,10 +52,9 @@ class InternalNode(BPlusNode):
 
 
 class BPlusTree:
-    PAGE_SIZE = 4096
-
     def __init__(self, filename: str, page_manager, key_format: str = 'i'):
         self.pm = page_manager
+        self.PAGE_SIZE = getattr(self.pm, 'PAGE_SIZE', get_index_page_size())
         self.key_format = key_format
         self.key_size   = struct.calcsize(key_format)
         self.key_is_str = key_format.endswith('s')
@@ -537,3 +538,6 @@ class BPlusTree:
             self.header.height      -= 1
             self._save_header()
             self._update_parent_pointer(new_root_id, -1)
+
+    def flush_metadata(self) -> None:
+        self._save_header()

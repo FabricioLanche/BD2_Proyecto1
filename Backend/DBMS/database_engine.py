@@ -1,16 +1,16 @@
 import time
 from typing import Dict
 
-from DBMS.organization.data_structures import TableConfig, Record
-from DBMS.organization.heap_file import HeapFile
-from DBMS.organization.sequential_file import SequentialIndex
-from DBMS.organization.page_manager import PageManager, IOCounter
+from Backend.DBMS.organization.data_structures import TableConfig, Record
+from Backend.DBMS.organization.heap_file import HeapFile
+from Backend.DBMS.organization.sequential_file import SequentialIndex
+from Backend.DBMS.organization.page_manager import PageManager, IOCounter
 from Backend.DBMS.utils.logger import ConsoleLogger
 from Backend.DBMS.utils.path_utils import resolve_dataset_path, resolve_data_path
 
-from DBMS.indexes.rtree import Rtree
-from DBMS.indexes.extendible_hashing import ExtendibleHashing
-from DBMS.indexes.b_plus_tree import BPlusTree
+from Backend.DBMS.indexes.rtree import Rtree
+from Backend.DBMS.indexes.extendible_hashing import ExtendibleHashing
+from Backend.DBMS.indexes.b_plus_tree import BPlusTree
 
 
 class QueryResult:
