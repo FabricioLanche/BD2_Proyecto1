@@ -1,13 +1,15 @@
 import json
 import math
-import os
 from Backend.DBMS.organization.page_manager import PageManager
 from Backend.DBMS.utils.path_utils import resolve_data_path
 
 class SystemCatalog:
-    def __init__(self, filename="system_catalog.dat"):
+    def __init__(self, filename="system_catalog.dat", page_manager: PageManager = None, page_size: int = None):
         self.filename = resolve_data_path(filename, create_parent=True)
-        self.pm = PageManager(self.filename)
+        if page_manager is not None:
+            self.pm = page_manager
+        else:
+            self.pm = PageManager(self.filename, page_size=page_size)
         self.metadata = {} 
         self._load_catalog()
 
@@ -37,7 +39,6 @@ class SystemCatalog:
             self.pm.write_page(i, chunk)
 
     def create_table(self, table_name, columns_ast):
-        # Soporte para solo 1 tabla, es decir se sobrescribe la tabla actual del catalogo con la nueva
         self.metadata = {table_name: columns_ast}
         self._save_catalog()
 

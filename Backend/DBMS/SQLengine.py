@@ -8,7 +8,6 @@ from Backend.DBMS.utils.logger import ConsoleLogger
 from Backend.DBMS.utils.path_utils import resolve_dataset_path
 
 from Backend.DBMS.database_engine import DatabaseEngine
-from Backend.DBMS.config import set_index_page_size, get_index_page_size
 
 
 class DBMSEngine:
@@ -18,6 +17,7 @@ class DBMSEngine:
         self.catalog = SystemCatalog()
         self.storage = DatabaseEngine(logger=self.logger)
         self._metadata_cache = {}
+        self.page_size = None
         self.logger.info("Catalog cargado exitosamente!")
 
     def set_logger(self, logger):
@@ -90,7 +90,7 @@ class DBMSEngine:
         pk_col_name = next((c["nombre"] for c in esquema if c.get("primary_key")), "id")
         table_config = TableConfig(formato_binario, nombres_columnas, pk_col_name)
 
-        self.storage.open_table(table_name, table_config, pk_col_name, spatial_meta, hash_meta, btree_meta)
+        self.storage.open_table(table_name, table_config, pk_col_name, spatial_meta, hash_meta, btree_meta, page_size=self.page_size)
 
         meta = (esquema, table_config, pk_col_name)
         self._metadata_cache[table_name] = meta
@@ -132,8 +132,9 @@ class DBMSEngine:
         elif action == "SET_PAGESIZE":
             size = ast.get("size")
             try:
-                set_index_page_size(size)
-                self.logger.info(f"Tamaño de página de índices ajustado a {get_index_page_size()}")
+                # Guardar en la sesión del motor; se aplica a nuevas tablas/índices creados
+                self.page_size = int(size) if size is not None else None
+                self.logger.info(f"Tamaño de página para índices establecido a {self.page_size}")
             except Exception as e:
                 self.logger.error(f"Error al aplicar PAGESIZE: {e}")
 
@@ -229,11 +230,11 @@ class DBMSEngine:
         if filepath:
             resolved_filepath = resolve_dataset_path(filepath)
             self.logger.info(f"Delegando carga masiva desde CSV al Storage Engine para '{table_name}'... ({resolved_filepath})")
-            result = self.storage.create_table_from_csv(table_name, table_config, resolved_filepath, pk_col_name, spatial_meta, hash_meta, btree_meta)
+            result = self.storage.create_table_from_csv(table_name, table_config, resolved_filepath, pk_col_name, spatial_meta, hash_meta, btree_meta, page_size=self.page_size)
             self.logger.info(f"{result}")
         else:
             self.logger.info(f"Delegando creación física al Storage Engine para '{table_name}'...")
-            self.storage.open_table(table_name, table_config, pk_col_name, spatial_meta, hash_meta, btree_meta)
+            self.storage.open_table(table_name, table_config, pk_col_name, spatial_meta, hash_meta, btree_meta, page_size=self.page_size)
             self.logger.info(f"Tabla '{table_name}' creada exitosamente.")
 
     def _execute_insert(self, ast):
@@ -422,11 +423,9 @@ class DBMSEngine:
 
             if search_type == "RTREE_RADIUS":
                 radius = ast["radius"]
-                self.logger.info(f"Spatial Scan: puntos a radio {radius} de POINT({x}, {y})...")
                 result = self.storage.search_spatial_radius(table_name, x, y, radius)
             elif search_type == "RTREE_KNN":
                 k = ast["k"]
-                self.logger.info(f"Spatial Scan: {k} vecinos más cercanos a POINT({x}, {y})...")
                 result = self.storage.search_spatial_knn(table_name, x, y, k)
             else:
                 raise Exception(f"Error Semántico: Operación espacial no soportada: {search_type}")

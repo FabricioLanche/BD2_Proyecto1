@@ -1,17 +1,16 @@
    #Capa 1: Acceso a Disco
 import os
-from Backend.DBMS.config import get_index_page_size
 
 class PageManager:
+    DEFAULT_PAGE_SIZE = 4096
+
     def __init__(self, db_filename, io_counter=None, page_size=None):
         self.db_filename = db_filename
-        # Si no se especifica, tomar tamaño desde la configuración central
         if page_size is None:
-            page_size = get_index_page_size()
-        self.PAGE_SIZE = page_size  # Tamaño de página configurable
+            page_size = self.DEFAULT_PAGE_SIZE
+        self.PAGE_SIZE = int(page_size)
         self.read_count = 0
         self.write_count = 0
-        #Contador global de I/O compartido
         self.io_counter  = io_counter
 
         self.last_page_id_loaded = -1
@@ -94,8 +93,6 @@ class PageManager:
         return new_page_id
     
 class IOCounter:
-    # Contador global de I/O compartido
-    
     def __init__(self):
         self.reads  = 0
         self.writes = 0

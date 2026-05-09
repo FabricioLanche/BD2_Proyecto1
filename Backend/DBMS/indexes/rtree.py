@@ -143,6 +143,63 @@ class RtreeFile:
                 self.FILE_HEADER.N_PAGES
             ))
 
+
+class _RtreeFileAdapter:
+    def __init__(self, page_manager):
+        self.pm = page_manager
+        self.FILE_PATH = self.pm.db_filename
+        class FH:
+            pass
+        self.FILE_HEADER = FH()
+        self.FILE_HEADER.PAGE_SIZE = self.pm.PAGE_SIZE
+        raw = self.pm.read_page(0)
+        try:
+            vals = struct.unpack(FILE_HEADER_FORMAT, raw[:FILE_HEADER_SIZE])
+            self.FILE_HEADER.PAGE_SIZE, self.FILE_HEADER.ROOT_PAGE, self.FILE_HEADER.N_PAGES = vals
+            if not isinstance(self.FILE_HEADER.PAGE_SIZE, int) or self.FILE_HEADER.PAGE_SIZE <= 0 or self.FILE_HEADER.N_PAGES <= 0:
+                raise ValueError("Invalid R-tree file header")
+        except Exception:
+            self.FILE_HEADER.PAGE_SIZE = self.pm.PAGE_SIZE
+            self.FILE_HEADER.ROOT_PAGE = -1
+            self.FILE_HEADER.N_PAGES = 0
+            self.write_file_header()
+        try:
+            self.MAX_ENTRIES = (self.FILE_HEADER.PAGE_SIZE - PAGE_HEADER_SIZE) // NODE_ENTRY_SIZE
+        except Exception:
+            self.MAX_ENTRIES = (self.pm.PAGE_SIZE - PAGE_HEADER_SIZE) // NODE_ENTRY_SIZE
+
+    def _map_page(self, page_id: int) -> int:
+        return page_id + 1
+
+    def read_page(self, page_id: int) -> Page:
+        mapped = self._map_page(page_id)
+        data = self.pm.read_page(mapped)
+        return Page(page_id, bytearray(data))
+
+    def write_page(self, page: Page):
+        mapped = self._map_page(page.PAGE_ID)
+        if len(page.DATA) != self.FILE_HEADER.PAGE_SIZE:
+            raise ValueError("Invalid page size")
+        self.pm.write_page(mapped, bytes(page.DATA))
+        self.FILE_HEADER.N_PAGES = max(self.FILE_HEADER.N_PAGES, page.PAGE_ID + 1)
+
+    def allocate_page(self) -> int:
+        new_mapped = self.pm.allocate_new_page()
+        new_id = new_mapped - 1
+        self.FILE_HEADER.N_PAGES = max(self.FILE_HEADER.N_PAGES, new_id + 1)
+        self.write_file_header()
+        return new_id
+
+    def read_file_header(self) -> None:
+        raw = self.pm.read_page(0)
+        vals = struct.unpack(FILE_HEADER_FORMAT, raw[:FILE_HEADER_SIZE])
+        self.FILE_HEADER.PAGE_SIZE, self.FILE_HEADER.ROOT_PAGE, self.FILE_HEADER.N_PAGES = vals
+
+    def write_file_header(self) -> None:
+        buf = bytearray(self.pm.PAGE_SIZE)
+        struct.pack_into(FILE_HEADER_FORMAT, buf, 0, self.FILE_HEADER.PAGE_SIZE, self.FILE_HEADER.ROOT_PAGE, self.FILE_HEADER.N_PAGES)
+        self.pm.write_page(0, bytes(buf))
+
 class Rtree:
     # RTREE_FILE: RtreeFile
 
@@ -460,8 +517,11 @@ class Rtree:
                 self._aux_range_search(child, point, radio, result)
 
     #NOTE: Metodos publicos
-    def __init__(self, filename="RtreeFile.bin"):
-        self.RTREE_FILE = RtreeFile(filename)
+    def __init__(self, filename="RtreeFile.bin", page_manager=None):
+        if page_manager is not None:
+            self.RTREE_FILE = _RtreeFileAdapter(page_manager)
+        else:
+            self.RTREE_FILE = RtreeFile(filename)
 
         if self.RTREE_FILE.FILE_HEADER.ROOT_PAGE == -1:
             root = self._create_node(is_leaf=True)
@@ -488,8 +548,10 @@ class Rtree:
                 self._save_node(node2)
                 self._adjust_tree(node1, node2)
             return True
-        except:
-            return False
+        except Exception as e:
+            # Log exception for debugging
+            print(f"[RTREE ERROR] insert failed: {e}")
+            raise
 
     # NOTE
     # Este método remueve el punto recibido como argumento. Si el punto

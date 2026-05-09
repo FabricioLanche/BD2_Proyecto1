@@ -1,7 +1,9 @@
 import time
 from typing import Dict
+import struct
 
 from Backend.DBMS.organization.data_structures import TableConfig, Record
+from Backend.DBMS.organization.buffer_manager import BufferManager, PageLockStats
 from Backend.DBMS.organization.heap_file import HeapFile
 from Backend.DBMS.organization.sequential_file import SequentialIndex
 from Backend.DBMS.organization.page_manager import PageManager, IOCounter
@@ -65,6 +67,11 @@ class DatabaseEngine:
     def __init__(self, logger=None):
         self._tables: Dict[str, _TableEntry] = {}
         self.logger = logger or ConsoleLogger()
+        self.lock_stats = PageLockStats()
+
+    def _make_buffer_manager(self, filename: str, io_counter: IOCounter, page_size: int = None) -> BufferManager:
+        page_manager = PageManager(filename, io_counter, page_size=page_size)
+        return BufferManager(page_manager, self.lock_stats, logger=self.logger)
 
     def _decode_value(self, value):
         if isinstance(value, bytes):
@@ -80,6 +87,7 @@ class DatabaseEngine:
         spatial_meta: dict,
         hash_meta: list = None,
         btree_meta: list = None,
+        page_size: int = None,
     ) -> QueryResult:
         if table_name in self._tables:
             self.logger.error(f"Intento de crear tabla duplicada: '{table_name}' ya existe.")
@@ -91,8 +99,8 @@ class DatabaseEngine:
         heap_filename = resolve_data_path(f"{table_name}.heap", create_parent=True)
         index_filename = resolve_data_path(f"{table_name}_{pk_col}.idx", create_parent=True)
 
-        heap_pm = PageManager(heap_filename, io_counter)
-        index_pm = PageManager(index_filename, io_counter)
+        heap_pm = self._make_buffer_manager(heap_filename, io_counter, page_size=page_size)
+        index_pm = self._make_buffer_manager(index_filename, io_counter, page_size=page_size)
 
         heap = HeapFile(heap_filename, config, heap_pm)
         index = SequentialIndex(index_filename, index_pm, config.get_pk_format())
@@ -109,34 +117,33 @@ class DatabaseEngine:
 
         self.logger.info(f"Cargando CSV '{resolved_csv_path}' en la tabla '{table_name}'...")
         results = heap.load_from_csv_optimized(resolved_csv_path)
-        self.logger.info(f"{len(results)} registros cargados en heap.")
 
         entry = _TableEntry(heap, index, heap_pm, index_pm, io_counter, config, pk_col, spatial_meta, hash_meta or [], btree_meta or [])
 
         for meta in hash_meta or []:
             col_name = meta["nombre"]
             hash_path = resolve_data_path(f"{table_name}_{col_name}.hash", create_parent=True)
-            hash_pm = PageManager(hash_path, io_counter)
+            hash_pm = self._make_buffer_manager(hash_path, io_counter, page_size=page_size)
             entry.hash_indices[col_name] = ExtendibleHashing(hash_pm, config, col_name)
 
         for meta in btree_meta or []:
             col_name = meta["nombre"]
             btree_path = resolve_data_path(f"{table_name}_{col_name}.btree", create_parent=True)
-            btree_pm = PageManager(btree_path, io_counter)
+            btree_pm = self._make_buffer_manager(btree_path, io_counter, page_size=page_size)
             key_fmt = config.get_column_format(col_name)
             entry.btree_indices[col_name] = BPlusTree(btree_path, btree_pm, key_format=key_fmt)
 
         idx_x, idx_y = -1, -1
         if spatial_meta:
             rtree_filename = f"{table_name}_spatial.bin"
-            entry.rtree = Rtree(rtree_filename)
+            rtree_path = resolve_data_path(rtree_filename, create_parent=True)
+            rtree_pm = self._make_buffer_manager(rtree_path, io_counter, page_size=page_size)
+            entry.rtree = Rtree(rtree_filename, page_manager=rtree_pm)
             idx_x = config.column_map[spatial_meta["col_x"]]
             idx_y = config.column_map[spatial_meta["col_y"]]
-            self.logger.info(f"R-Tree espacial inicializado para '{table_name}'.")
 
         pk_idx = config.column_map[pk_col]
 
-        self.logger.info(f"Indexando {len(results)} registros para '{table_name}'...")
         for i, (rid, data_tuple) in enumerate(results):
             pk = self._decode_value(data_tuple[pk_idx])
             index.add(pk, rid)
@@ -153,17 +160,11 @@ class DatabaseEngine:
                 point = (data_tuple[idx_x], data_tuple[idx_y])
                 entry.rtree.insert(point, rid)
 
-            if (i + 1) % 10_000 == 0:
-                elapsed_partial = (time.perf_counter() - t0) * 1000
-                self.logger.debug(f"{i + 1}/{len(results)} registros indexados ({elapsed_partial:.1f} ms).")
-
-        self.logger.info(f"Flushing índice a disco ({len(index._dirty_pages)} páginas sucias)...")
         index.flush_metadata()
         index.bulk_load_mode = False
         index.k_limit = original_k_limit
 
         if index.k_aux > 0:
-            self.logger.info(f"Reconstruyendo índice: limpiando {index.k_aux} entradas auxiliares...")
             index.reconstruct()
 
         elapsed = (time.perf_counter() - t0) * 1000
@@ -190,6 +191,7 @@ class DatabaseEngine:
         spatial_meta: dict = None,
         hash_meta: list = None,
         btree_meta: list = None,
+        page_size: int = None,
     ) -> None:
         if table_name in self._tables:
             self.logger.debug(f"Tabla '{table_name}' ya estaba abierta. Se omite re-apertura.")
@@ -200,8 +202,8 @@ class DatabaseEngine:
         heap_filename = resolve_data_path(f"{table_name}.heap", create_parent=True)
         index_filename = resolve_data_path(f"{table_name}_{pk_col}.idx", create_parent=True)
 
-        heap_pm = PageManager(heap_filename, io_counter)
-        index_pm = PageManager(index_filename, io_counter)
+        heap_pm = self._make_buffer_manager(heap_filename, io_counter, page_size=page_size)
+        index_pm = self._make_buffer_manager(index_filename, io_counter, page_size=page_size)
 
         heap = HeapFile(heap_filename, config, heap_pm)
         index = SequentialIndex(index_filename, index_pm, config.get_pk_format())
@@ -215,20 +217,22 @@ class DatabaseEngine:
             for meta in hash_meta:
                 col_name = meta["nombre"]
                 hash_path = resolve_data_path(f"{table_name}_{col_name}.hash", create_parent=True)
-                hash_pm = PageManager(hash_path, io_counter)
+                hash_pm = self._make_buffer_manager(hash_path, io_counter, page_size=page_size)
                 self._tables[table_name].hash_indices[col_name] = ExtendibleHashing(hash_pm, config, col_name)
 
         if btree_meta:
             for meta in btree_meta:
                 col_name = meta["nombre"]
                 btree_path = resolve_data_path(f"{table_name}_{col_name}.btree", create_parent=True)
-                btree_pm = PageManager(btree_path, io_counter)
+                btree_pm = self._make_buffer_manager(btree_path, io_counter, page_size=page_size)
                 key_fmt = config.get_column_format(col_name)
                 self._tables[table_name].btree_indices[col_name] = BPlusTree(btree_path, btree_pm, key_format=key_fmt)
 
         if spatial_meta:
             rtree_filename = f"{table_name}_spatial.bin"
-            self._tables[table_name].rtree = Rtree(rtree_filename)
+            rtree_path = resolve_data_path(rtree_filename, create_parent=True)
+            rtree_pm = self._make_buffer_manager(rtree_path, io_counter, page_size=page_size)
+            self._tables[table_name].rtree = Rtree(rtree_filename, page_manager=rtree_pm)
             self.logger.info(f"R-Tree espacial cargado para '{table_name}'.")
 
     def insert(self, table_name: str, record: Record) -> QueryResult:
@@ -257,7 +261,6 @@ class DatabaseEngine:
             t.rtree.insert(point, rid)
 
         elapsed = (time.perf_counter() - t0) * 1000
-        self.logger.debug(f"INSERT en '{table_name}': RID={rid} | {elapsed:.2f} ms.")
         self.flush_table(table_name)
         return QueryResult(rid, t.io_counter.snapshot(), elapsed, "INSERT")
 
@@ -271,7 +274,6 @@ class DatabaseEngine:
 
         elapsed = (time.perf_counter() - t0) * 1000
         found = record is not None
-        self.logger.debug(f"SELECT en '{table_name}': PK={pk} | encontrado={found} | {elapsed:.2f} ms.")
         return QueryResult(record, t.io_counter.snapshot(), elapsed, "SELECT")
 
     def range_search(self, table_name: str, pk_start, pk_end) -> QueryResult:
@@ -283,7 +285,6 @@ class DatabaseEngine:
         records = t.heap.get_batch(rids) if rids else []
 
         elapsed = (time.perf_counter() - t0) * 1000
-        self.logger.debug(f"SELECT RANGE en '{table_name}': [{pk_start}, {pk_end}] | {len(records)} registro(s) | {elapsed:.2f} ms.")
         return QueryResult(records, t.io_counter.snapshot(), elapsed, "SELECT RANGE")
 
     def delete(self, table_name: str, pk) -> QueryResult:
@@ -294,7 +295,6 @@ class DatabaseEngine:
         rid = t.index.search_rid(pk)
         if not rid:
             elapsed = (time.perf_counter() - t0) * 1000
-            self.logger.debug(f"DELETE en '{table_name}': PK={pk} | eliminado=False | {elapsed:.2f} ms.")
             return QueryResult(False, t.io_counter.snapshot(), elapsed, "DELETE")
 
         record = t.heap.search(rid)
@@ -318,7 +318,6 @@ class DatabaseEngine:
         t.index.remove(pk)
 
         elapsed = (time.perf_counter() - t0) * 1000
-        self.logger.debug(f"DELETE en '{table_name}': PK={pk} | eliminado={deleted} | {elapsed:.2f} ms.")
         self.flush_table(table_name)
         return QueryResult(deleted, t.io_counter.snapshot(), elapsed, "DELETE")
 
@@ -327,11 +326,9 @@ class DatabaseEngine:
         t0 = time.perf_counter()
         self._reset_io(t)
 
-        self.logger.warning(f"Full Table Scan iniciado en '{table_name}'. Operación costosa.")
         records = [record for _, record in t.heap.scan()]
 
         elapsed = (time.perf_counter() - t0) * 1000
-        self.logger.debug(f"Full Scan en '{table_name}': {len(records)} registro(s) | {elapsed:.2f} ms.")
         return QueryResult(records, t.io_counter.snapshot(), elapsed, "FULL SCAN")
 
     def search_hash(self, table_name: str, col_name: str, val) -> QueryResult:
@@ -425,13 +422,11 @@ class DatabaseEngine:
         t0 = time.perf_counter()
         self._reset_io(t)
 
-        self.logger.info(f"Spatial Radius Search en '{table_name}': centro=({x}, {y}), radio={radius}.")
         rtree_results = t.rtree.rangeSearch((x, y), radius)
         rids = [res[1] for res in rtree_results]
         records = t.heap.get_batch(rids) if rids else []
 
         elapsed = (time.perf_counter() - t0) * 1000
-        self.logger.debug(f"RTREE RADIUS en '{table_name}': {len(records)} registro(s) | {elapsed:.2f} ms.")
         return QueryResult(records, t.io_counter.snapshot(), elapsed, "RTREE RADIUS")
 
     def search_spatial_knn(self, table_name: str, x: float, y: float, k: int) -> QueryResult:
@@ -439,13 +434,11 @@ class DatabaseEngine:
         t0 = time.perf_counter()
         self._reset_io(t)
 
-        self.logger.info(f"Spatial KNN Search en '{table_name}': centro=({x}, {y}), k={k}.")
         rtree_results = t.rtree.knnSearch((x, y), k)
         rids = [res[1] for res in rtree_results]
         records = t.heap.get_batch(rids) if rids else []
 
         elapsed = (time.perf_counter() - t0) * 1000
-        self.logger.debug(f"RTREE KNN en '{table_name}': {len(records)} registro(s) | {elapsed:.2f} ms.")
         return QueryResult(records, t.io_counter.snapshot(), elapsed, "RTREE KNN")
 
     def visualize_rtree(self, table_name: str) -> str:
@@ -455,3 +448,38 @@ class DatabaseEngine:
             raise Exception(f"La tabla '{table_name}' no tiene un R-Tree asociado.")
 
         return t.rtree.visualize()
+
+    def rebuild_rtree(self, table_name: str) -> None:
+        t = self._get_table(table_name)
+        if not t.rtree:
+            self.logger.error(f"La tabla '{table_name}' no tiene un R-Tree asociado.")
+            raise Exception(f"La tabla '{table_name}' no tiene un R-Tree asociado.")
+
+        # Vaciar/reestructurar archivo rtree (recrear estructura)
+        rtree_filename = f"{table_name}_spatial.bin"
+        rtree_path = resolve_data_path(rtree_filename, create_parent=True)
+        rtree_pm = self._make_buffer_manager(rtree_path, t.io_counter, page_size=t.heap_pm.PAGE_SIZE)
+        t.rtree = Rtree(rtree_filename, page_manager=rtree_pm)
+
+        count = 0
+        # Recorrer páginas del heap y reinsertar registros no eliminados
+        deleted_rids = t.heap._get_deleted_rids()
+        for page_id in range(1, t.heap.last_page_id + 1):
+            try:
+                page = t.heap.pm.read_page(page_id)
+            except Exception:
+                continue
+            record_count = t.heap._read_page_header(page)
+            for slot_id in range(record_count):
+                if (page_id, slot_id) in deleted_rids:
+                    continue
+                record_bytes = t.heap._read_record_from_slot(page, slot_id)
+                data_tuple = struct.unpack(t.heap.config.data_format, record_bytes)
+                # crear Record-like estructura mínima
+                point = (data_tuple[t.config.column_map[t.spatial_meta["col_x"]]], data_tuple[t.config.column_map[t.spatial_meta["col_y"]]])
+                rid = (page_id, slot_id)
+                ok = t.rtree.insert(point, rid)
+                if ok:
+                    count += 1
+
+        self.logger.info(f"R-Tree reconstruido para '{table_name}': {count} entradas insertadas.")

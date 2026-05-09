@@ -319,7 +319,7 @@ class SequentialIndex:
         # Main se lee página por página
 
         temp_filename = self.filename + ".tmp"
-        temp_pm = PageManager(temp_filename, self.pm.io_counter)
+        temp_pm = PageManager(temp_filename, self.pm.io_counter, page_size=self.pm.PAGE_SIZE)
 
         out_page_id  = 1
         out_page     = bytearray(b'\x00' * temp_pm.PAGE_SIZE)
