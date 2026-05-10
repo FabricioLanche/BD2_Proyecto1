@@ -279,7 +279,6 @@ class HeapFile:
                 current_page[offset:offset + record_size] = record_bytes
                 
                 rid = (current_page_id, current_record_count)
-                # Para las busquedas posteriores (sequential file) retorna tambien la tupla de datos 
                 results.append((rid, data_tuple))
                 
                 current_record_count += 1
@@ -315,8 +314,6 @@ class HeapFile:
             return raw.encode('utf-8')[:size].ljust(size, b'\x00')
         return raw
     
-    # helpers
-    
     def _slot_offset(self, slot_id: int) -> int:
         return self._PAGE_HEADER_SIZE + (slot_id * self.config.get_data_size())
     
@@ -324,7 +321,6 @@ class HeapFile:
         return struct.unpack(self._PAGE_HEADER_FORMAT, page[:self._PAGE_HEADER_SIZE])[0]
     
     def _write_page_header(self, page: bytearray, record_count: int) -> None:
-        # Escribe el conteo de registros en la cabecera de página.
         header = struct.pack(self._PAGE_HEADER_FORMAT, record_count)
         page[:self._PAGE_HEADER_SIZE] = header
     

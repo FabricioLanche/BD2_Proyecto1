@@ -28,7 +28,6 @@ class DBMSEngine:
                 if hasattr(buffer_manager, "lock_manager"):
                     buffer_manager.lock_manager.logger = self.logger
 
-            # Sincronizar LockManager del SequentialIndex (PK index)
             if hasattr(table.index, "lock_manager"):
                 table.index.lock_manager.logger = self.logger
 
@@ -161,7 +160,6 @@ class DBMSEngine:
         elif action == "SET_PAGESIZE":
             size = ast.get("size")
             try:
-                # Guardar en la sesión del motor; se aplica a nuevas tablas/índices creados
                 self.page_size = int(size) if size is not None else None
                 self.logger.info(f"Tamaño de página para índices establecido a {self.page_size}")
             except Exception as e:

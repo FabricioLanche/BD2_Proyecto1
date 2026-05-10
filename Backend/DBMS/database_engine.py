@@ -517,14 +517,12 @@ class DatabaseEngine:
             self.logger.error(f"La tabla '{table_name}' no tiene un R-Tree asociado.")
             raise Exception(f"La tabla '{table_name}' no tiene un R-Tree asociado.")
 
-        # Vaciar/reestructurar archivo rtree (recrear estructura)
         rtree_filename = f"{table_name}_spatial.bin"
         rtree_path = resolve_data_path(rtree_filename, create_parent=True)
         rtree_pm = self._make_buffer_manager(rtree_path, t.io_counter, page_size=t.heap_pm.PAGE_SIZE)
         t.rtree = Rtree(rtree_filename, page_manager=rtree_pm)
 
         count = 0
-        # Recorrer páginas del heap y reinsertar registros no eliminados
         deleted_rids = t.heap._get_deleted_rids()
         for page_id in range(1, t.heap.last_page_id + 1):
             try:
@@ -537,7 +535,6 @@ class DatabaseEngine:
                     continue
                 record_bytes = t.heap._read_record_from_slot(page, slot_id)
                 data_tuple = struct.unpack(t.heap.config.data_format, record_bytes)
-                # crear Record-like estructura mínima
                 point = (data_tuple[t.config.column_map[t.spatial_meta["col_x"]]], data_tuple[t.config.column_map[t.spatial_meta["col_y"]]])
                 rid = (page_id, slot_id)
                 ok = t.rtree.insert(point, rid)

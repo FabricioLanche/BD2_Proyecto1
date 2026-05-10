@@ -35,14 +35,12 @@ class SequentialIndex:
         self._init_metadata()
         self.sparse_index = self._build_sparse_index()
         
-        # Flag para deshabilitar estrategia híbrida durante carga masiva
         self.bulk_load_mode = False
         
         self.last_logical_pos = -1
-        
-        # Páginas en RAM sin escribir a disco
+    
         self._page_cache = {}     
-        self._dirty_pages = set()  # Páginas modificadas (para flush final)
+        self._dirty_pages = set()
 
     def _exclusive_write_lock(self):
         return self.lock_manager.exclusive(self._write_lock_id, timeout=self.lock_timeout)
@@ -51,7 +49,6 @@ class SequentialIndex:
         page0 = self.pm.read_page(0)
         
         if page0[:self._METADATA_SIZE] == b'\x00' * self._METADATA_SIZE:
-            #Crear metadata inicial
             self.n_main = 0  
             self.k_aux = 0 
             self.k_limit = 1 
@@ -59,7 +56,6 @@ class SequentialIndex:
             self.last_main_page = 0  
             self._persist_metadata()
         else:
-            # Cargar metadata existente
             data = struct.unpack(self._METADATA_FORMAT, page0[:self._METADATA_SIZE])
             self.n_main = data[0]
             self.k_aux = data[1]
@@ -68,7 +64,6 @@ class SequentialIndex:
             self.last_main_page = data[4]
     
     def _persist_metadata(self) -> None:
-        #Escribe metadata a disco -> solo se llama en momentos clave: reconstruct, flush, init
         page0 = bytearray(self.pm.read_page(0))
         metadata = struct.pack(
             self._METADATA_FORMAT,
@@ -80,31 +75,25 @@ class SequentialIndex:
         )
         page0[:self._METADATA_SIZE] = metadata
 
-        # Pack pk_format (máx 16 bytes para el string)
         pk_fmt_bytes = self.pk_format.encode('ascii').ljust(16, b'\x00')
         page0[self._METADATA_SIZE:self._METADATA_SIZE+16] = pk_fmt_bytes
     
         self.pm.write_page(0, bytes(page0))
     
     def flush_metadata(self) -> None:
-        # flushing -> Escribir todas las páginas en cache a disco
-        # IMPORTANTE: Preparar todo ANTES de adquirir el lock
         pages_to_write = {}
         if self._dirty_pages:
             for page_id in sorted(self._dirty_pages):
                 if page_id in self._page_cache:
                     pages_to_write[page_id] = bytes(self._page_cache[page_id])
         
-        # Ahora escribir SIN mantener el lock exclusivo
         for page_id, data in pages_to_write.items():
             self.pm.write_page(page_id, data)
         
-        # Limpiar cache solo después de escribir exitosamente
         if pages_to_write:
             self._page_cache.clear()
             self._dirty_pages.clear()
         
-        # Finalmente, persistir metadata CON el lock
         with self._exclusive_write_lock():
             self._persist_metadata()
     
@@ -127,15 +116,14 @@ class SequentialIndex:
         return sparse
     
     def search_rid(self, pk: int) -> Optional[Tuple[int, int]]:
-        #Busca el RID asociado a una PK:
-        #1. Búsqueda binaria en sparse_index para identificar página candidata.
-        #2. Recorrido de la cadena lógica (next_pos) desde el primer entry de esa página.
+        # Busca el RID asociado a una PK:
+        # 1. Búsqueda binaria en sparse_index para identificar página candidata.
+        # 2. Recorrido de la cadena lógica (next_pos) desde el primer entry de esa página.
         if self.first_logical_pos == -1:
             return None
         
         start_pos = self._sparse_start_pos(pk)
         
-        # Recorre la cadena lógica desde start_pos
         current_pos = start_pos
         visited = set()
         
@@ -152,15 +140,15 @@ class SequentialIndex:
                 return (rid_p, rid_s)
             
             if pk_entry > pk:
-                return None  # Lista ordenada, no lo encontraremos
+                return None
             
             current_pos = next_pos
         
         return None
     
     def _sparse_start_pos(self, pk: int) -> int:
-        #Búsqueda binaria en sparse_index → posición del primer entry
-        #de la última página con first_pk <= pk
+        # Búsqueda binaria en sparse_index → posición del primer entry
+        # de la última página con first_pk <= pk
         if not self.sparse_index:
             return self.first_logical_pos
         
@@ -177,7 +165,6 @@ class SequentialIndex:
                 right = mid - 1
         
         if page_idx == -1:
-            # pk menor que todo el sparse_index → empezar desde el inicio
             return self.first_logical_pos
         
         candidate_page = self.sparse_index[page_idx][1]
@@ -186,18 +173,15 @@ class SequentialIndex:
     def range_search_rids(self, pk1: int, pk2: int) -> List[Tuple[int, int]]:
         result = []
         
-        # Encuentra el primer registro >= pk1
         current_rid = self._find_first_greater_equal(pk1)
         if not current_rid:
             return []
         
-        # Recorre la cadena lógica hasta pk > pk2
         visited = set()
         
         while current_rid:
             page_id, slot_id = current_rid
-            
-            # Prevención de ciclos
+
             pos_key = (page_id, slot_id)
             if pos_key in visited:
                 break
@@ -205,8 +189,7 @@ class SequentialIndex:
             
             page = self.pm.read_page(page_id)
             pk_entry, rid_p, rid_s, next_pos = self._read_by_RID(page, slot_id)
-            
-            # Saltear eliminados
+
             if pk_entry == self._tombstone_pk():
                 current_rid = self._follow_next_pos(next_pos)
                 continue
@@ -260,19 +243,15 @@ class SequentialIndex:
                     self.last_logical_pos = new_pos
                 
                 self.k_aux += 1
-                # No se hacen reconstrucciones ni se escribe la página durante bulk_load
             else:
-                # Modo normal: Búsqueda y validación
                 pred_pos, succ_pos = self._find_predecessor(pk)
                 
-                # Inserta en área auxiliar
                 new_pos = self._allocate_entry_in_aux()
                 self._write_entry_at_pos(new_pos, pk, rid_page, rid_slot, succ_pos)
                 
                 if pred_pos == -1:
                     self.first_logical_pos = new_pos
                 else:
-                    # Actualiza predecesor
                     page_id, slot_id = self._pos_to_page_slot(pred_pos)
                     page = bytearray(self.pm.read_page(page_id))
                     pk_pred, rp, rs, _ = self._read_by_RID(page, slot_id)
@@ -280,7 +259,6 @@ class SequentialIndex:
                     self.pm.write_page(page_id, bytes(page))
                 
                 self.k_aux += 1
-                # Metadata se mantiene en RAM; se persiste en reconstruct() o flush()
                 if self.k_aux >= self.k_limit:
                     self.reconstruct()
     
@@ -297,7 +275,6 @@ class SequentialIndex:
             _, rid_p, rid_s, next_pos = self._read_by_RID(page, curr_slot_id)
             
             if pred_pos == -1:
-                # curr era el primero
                 self.first_logical_pos = next_pos
             else:
                 pred_page_id, pred_slot_id = self._pos_to_page_slot(pred_pos)
@@ -306,12 +283,10 @@ class SequentialIndex:
                 self._write_entry_on_page(pred_page, pred_slot_id, pk_pred, rp, rs, next_pos)
                 self.pm.write_page(pred_page_id, bytes(pred_page))
             
-            #  marcamos como eliminado, preservando next_pos para mantener la cadena lógica intacta
             self._write_entry_on_page(page, curr_slot_id, self._tombstone_pk(), -1, -1, next_pos)
             self.pm.write_page(curr_page_id, bytes(page))
             
             self.n_main = max(0, self.n_main - 1)
-            # Metadata se mantiene en RAM; se persiste en flush()
             
             return (rid_p, rid_s)
     
@@ -415,7 +390,6 @@ class SequentialIndex:
                     if is_last:
                         new_next = -1
                     else:
-                        # El siguiente entry está en el próximo slot (posición física directa)
                         next_entry_idx = entry_global
                         next_page_id = (next_entry_idx // self.entries_per_page) + 1
                         next_slot_id = next_entry_idx % self.entries_per_page
@@ -425,7 +399,6 @@ class SequentialIndex:
 
                 temp_pm.write_page(page_id, bytes(page))
 
-            # Reemplazamos el archivo y actualizamos metadata
             os.replace(temp_filename, self.filename)
             self.pm.invalidate_cache()
             self._page_cache.clear()
@@ -436,15 +409,13 @@ class SequentialIndex:
             self.k_aux = 0
             self.last_main_page = last_out_page
             self.k_limit = max(1, math.ceil(math.log2(max(1, total_valid))))
-            self.first_logical_pos = 4  # Byte 4 de página 1 (primer slot tras header)
+            self.first_logical_pos = 4
             self._persist_metadata()
         
-
-    # Métodos privados (helpers)
     def _decode_pk(self, raw_pk):
         if self.pk_is_str:
             return raw_pk.decode('utf-8', errors='ignore').rstrip('\x00')
-        return raw_pk  # int y float ya son comparables
+        return raw_pk
     
     def _tombstone_pk(self):
         if self.pk_is_str:
@@ -458,11 +429,9 @@ class SequentialIndex:
         # Encuentra posiciones del predecesor y sucesor lógico de una PK (pred_pos, succ_pos)
         if self.first_logical_pos == -1:
             return (-1, -1)
-        # - Si bulk_load_mode: SIEMPRE usar sparse_index (ignora k_aux)
-        # - Si k_aux==0: usar sparse_index para optimización O(log P)
         if self.bulk_load_mode or self.k_aux == 0:
             current_pos = self._sparse_start_pos(pk)
-        else: # Si k_aux>0: comenzar desde first_logical_pos
+        else:
             current_pos = self.first_logical_pos
         
         prev_pos = -1
@@ -472,12 +441,10 @@ class SequentialIndex:
             page = self.pm.read_page(page_id)
             pk_entry, _, _, next_pos = self._read_by_RID(page, slot_id)
             
-            # Saltear eliminados pero no actualizar prev_pos con ellos
             if pk_entry == self._tombstone_pk():
                 current_pos = next_pos
                 continue
             
-            # Prevenir inserción de duplicados aquí mismo
             if pk_entry == pk:
                 raise ValueError(f"Violación de restricción UNIQUE: la llave primaria {pk} ya existe.")
                 
@@ -490,7 +457,7 @@ class SequentialIndex:
         return (prev_pos, -1)
     
     def _find_first_greater_equal(self, pk: int) -> Optional[Tuple[int, int]]:
-        #Encuentra el primer entry con pk_entry >= pk.
+        # Encuentra el primer entry con pk_entry >= pk.
         if self.first_logical_pos == -1:
             return None
         
@@ -513,7 +480,6 @@ class SequentialIndex:
             page = self.pm.read_page(page_id)
             pk_entry, _, _, next_pos = self._read_by_RID(page, slot_id)
             
-            # Saltear eliminados
             if pk_entry == self._tombstone_pk():
                 current_pos = next_pos
                 continue
@@ -555,8 +521,7 @@ class SequentialIndex:
             page_id, slot_id = self._pos_to_page_slot(current_pos)
             page = self.pm.read_page(page_id)
             pk_entry, _, _, next_pos = self._read_by_RID(page, slot_id)
-            
-            # Saltear tombstones
+
             if pk_entry == self._tombstone_pk():
                 current_pos = next_pos
                 continue
@@ -578,7 +543,6 @@ class SequentialIndex:
         return self._pos_to_page_slot(next_pos)
     
     def _follow_chain(self, pk: int, start_pos: int) -> Optional[Tuple[int, int]]:
-        # Sigue una cadena desde start_pos buscando una PK exacta
         current_pos = start_pos
         visited = set()
         
@@ -599,7 +563,6 @@ class SequentialIndex:
         return None
     
     def _allocate_entry_in_aux(self) -> int:
-        # k_aux = cuántas entradas aux ya existen → índice 0-based de la nueva
         page_offset = self.k_aux // self.entries_per_page
         slot_id     = self.k_aux % self.entries_per_page
         page_id     = self.last_main_page + 1 + page_offset
@@ -607,16 +570,14 @@ class SequentialIndex:
         return pos
     
     def _pos_to_page_slot(self, pos: int) -> Tuple[int, int]:
-        # posición absoluta (bytes) -> (page_id, slot_id dentro de la página)
         if pos == -1:
             return (-1, -1)
         page_id = (pos // self.pm.PAGE_SIZE) + 1
         slot_offset = pos % self.pm.PAGE_SIZE
-        slot_id = (slot_offset - 4) // self.NODE_SIZE  # -4 por el header
+        slot_id = (slot_offset - 4) // self.NODE_SIZE
         return (page_id, slot_id)
     
     def _write_entry_at_pos(self, pos: int, pk: int, rid_p: int, rid_s: int, next_pos: int) -> None:
-        #Escribe una entrada en una posición absoluta
         page_id, slot_id = self._pos_to_page_slot(pos)
         
         if self.bulk_load_mode:
@@ -626,18 +587,15 @@ class SequentialIndex:
             page = self._page_cache[page_id]
             self._write_entry_on_page(page, slot_id, pk, rid_p, rid_s, next_pos)
             
-            # Actualiza header si este slot extiende el conteo
             current_count = self._read_page_header(page)
             if slot_id >= current_count:
                 self._write_page_header(page, slot_id + 1)
             
-            # Marcar como dirty
             self._dirty_pages.add(page_id)
         else:
             page = bytearray(self.pm.read_page(page_id))
             self._write_entry_on_page(page, slot_id, pk, rid_p, rid_s, next_pos)
             
-            # Actualiza header si este slot extiende el conteo
             current_count = self._read_page_header(page)
             if slot_id >= current_count:
                 self._write_page_header(page, slot_id + 1)

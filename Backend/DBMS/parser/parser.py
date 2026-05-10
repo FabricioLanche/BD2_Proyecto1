@@ -14,7 +14,7 @@ class SQLParser:
             return token
         raise SyntaxError(f"Error Sintáctico: Se esperaba {expected_type}, se encontró {self.current().type} ('{self.current().value}')")
 
-    def parse(self): # equivalente a program en la gramatica
+    def parse(self):
         statements = []
         while self.current().type != 'EOF':
             statements.append(self.parse_statement())
@@ -46,7 +46,7 @@ class SQLParser:
         return {"action": "VISUALIZE", "object": "RTREE", "table": table_name}
 
     def pagesize_stmt(self):
-        # Sintaxis simple: PAGESIZE <NUM>
+        # Sintaxis: PAGESIZE <NUM>
         self.match('PAGESIZE')
         if self.current().type != 'NUM':
             raise SyntaxError('Se esperaba un número para PAGESIZE')

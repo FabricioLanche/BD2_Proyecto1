@@ -13,7 +13,6 @@ class TableConfig:
         self.pk_index = 0
         self.pk_col_name = pk_col_name
 
-        # Mapeo: dónde está cada atributo en la tupla
         self.column_map = {name: idx for idx, name in enumerate(column_names)}
 
         if pk_col_name in self.column_map:
@@ -43,14 +42,12 @@ class Record:
     def __init__(self, data_tuple: Tuple[Any, ...], table_config: Optional[TableConfig] = None):
         self.data_tuple = data_tuple
         self.config = table_config
-        # Limpiar strings: remover \x00 padding de bytes
         self.cleaned_values = self._clean_values(data_tuple)
     
     def _clean_values(self, data_tuple: Tuple) -> list:
         cleaned = []
         for val in data_tuple:
             if isinstance(val, bytes):
-                # Decodificar y quitar padding nulo
                 cleaned.append(val.decode('utf-8', errors='ignore').rstrip('\x00'))
             else:
                 cleaned.append(val)
@@ -58,7 +55,6 @@ class Record:
     
     def get_pk(self):
         # Asumimos que la PK esta en la posicion 0
-        #return self.data_tuple[0]
         return self.data_tuple[self.config.pk_index]
         
     def get_attribute(self, column_name):

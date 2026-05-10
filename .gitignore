@@ -9,7 +9,6 @@ __pycache__
 *.idx
 *.bin
 *.tmp
-*.csv
 *.dat
 *.hash
 *.hashmeta

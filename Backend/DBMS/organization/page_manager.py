@@ -1,4 +1,3 @@
-   #Capa 1: Acceso a Disco
 import os
 
 class PageManager:
@@ -33,7 +32,6 @@ class PageManager:
             f.seek(offset)
             data_leida = f.read(self.PAGE_SIZE)
 
-        #Si el contenido de la pagina no llega a ser 4KB, rellenamos con 0s
         if len(data_leida) < self.PAGE_SIZE:
            data_leida = data_leida.ljust(self.PAGE_SIZE, b'\x00')
         self.last_page_id_loaded = page_id
@@ -49,7 +47,6 @@ class PageManager:
             f.seek(offset)
             f.write(data.ljust(self.PAGE_SIZE, b'\x00'))
             
-        # Si la pagina es la misma en cache, reiniciamos el cache para mantener la consistencia (version)
         if page_id == self.last_page_id_loaded:
           self.last_page_id_loaded = -1
           self.last_page_data = None
@@ -69,7 +66,6 @@ class PageManager:
             "total": self.read_count + self.write_count
         }
     def allocate_new_page(self) -> int:
-        # Asigna una nueva página
         file_size = os.path.getsize(self.db_filename)
         
         if file_size % self.PAGE_SIZE != 0:
@@ -84,7 +80,7 @@ class PageManager:
             with open(self.db_filename, 'r+b') as f:
                 f.seek(0, 2)
                 f.write(b'\x00' * self.PAGE_SIZE)
-                f.flush()  # Forzar escritura a disco
+                f.flush()
         except IOError as e:
             raise IOError(f"Error al escribir nueva página: {e}")
         

@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 
 import matplotlib
-matplotlib.use('Agg')  # Non-GUI backend para evitar problemas en servidores
+matplotlib.use('Agg') 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import seaborn as sns
@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Callable
 from tabulate import tabulate
 
-# Agregar path para importar Backend
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from Backend.DBMS.database_engine import DatabaseEngine, QueryResult
@@ -42,14 +41,12 @@ RESULTS_DIR = SCRIPT_DIR / "results"
 PLOTS_DIR = RESULTS_DIR / "plots"
 ENGINE_DATA_DIR = Path(resolve_data_path("engine_data_probe.tmp")).parent
 
-# ✓ MEJORADO: Validación robusta de directorios
 def ensure_directories():
     """Crea directorios con validación de permisos"""
     dirs = [DATA_DIR, RESULTS_DIR, PLOTS_DIR]
     for dir_path in dirs:
         try:
             dir_path.mkdir(parents=True, exist_ok=True)
-            # Verificar que podemos escribir
             test_file = dir_path / ".write_test"
             test_file.touch()
             test_file.unlink()
@@ -61,7 +58,6 @@ def ensure_directories():
 ensure_directories()
 os.chdir(DATA_DIR)
 
-# Configuración de tabla para cities.csv
 CONFIG = TableConfig(
     data_format='<i50si3s30si2s30sff20s',
     column_names=[
@@ -71,7 +67,6 @@ CONFIG = TableConfig(
     pk_col_name='id'
 )
 
-# Estilos de gráficas
 sns.set_style("whitegrid")
 COLORS = {
     'sequential': '#2196F3',
@@ -120,15 +115,12 @@ def invalidar_cache_y_resetear(engine: DatabaseEngine, table_name: str) -> None:
     Garantiza mediciones en disco frío real.
     """
     table_entry = engine._tables[table_name]
-    # Invalidar caché del BufferManager
     table_entry.heap_pm.invalidate_cache()
     table_entry.index_pm.invalidate_cache()
-    # Invalidar caché interna del PageManager subyacente (mini-caché de 1 página)
     if hasattr(table_entry.heap_pm, 'pm'):
         table_entry.heap_pm.pm.invalidate_cache()
     if hasattr(table_entry.index_pm, 'pm'):
         table_entry.index_pm.pm.invalidate_cache()
-    # Invalidar caché de índices secundarios (hash, btree, rtree)
     for h_idx in table_entry.hash_indices.values():
         if hasattr(h_idx, 'pm'):
             h_idx.pm.invalidate_cache()
@@ -169,14 +161,11 @@ def setup_engine(
         
     limpiar_archivos_tabla(table_name)
     
-    # Crear CSV temporal con solo n registros
     tmp_csv = DATA_DIR / f"_tmp_{table_name}_{n}.csv"
     crear_csv_temporal_n(csv_path, n, tmp_csv)
     
-    # Crear engine y cargar datos
     engine = DatabaseEngine()
     
-    # Extraer PKs y coordenadas del CSV temporal
     pks = []
     coords = []
     with open(tmp_csv, 'r', encoding='utf-8') as f:
@@ -188,7 +177,6 @@ def setup_engine(
             except Exception:
                 pass
     
-    # Crear tabla desde CSV TEMPORAL
     result = engine.create_table_from_csv(
         table_name=table_name,
         config=config,
@@ -200,13 +188,11 @@ def setup_engine(
         page_size=4096
     )
     
-    # Limpieza
     try:
         tmp_csv.unlink()
     except:
         pass
     
-    # Capturar I/O de inserción
     io_insercion = engine._tables[table_name].io_counter.snapshot()
     
     return engine, pks, coords, io_insercion
@@ -230,14 +216,11 @@ def medir_busquedas(
     
     for sample in samples:
         try:
-            # Disco frío: invalida caché ANTES de cada búsqueda
             invalidar_cache_y_resetear(engine, table_name)
             
-            # Ejecutar búsqueda
             result = metodo_fn(sample)
             if result:
                 io_stats = result.io_stats
-                # IOCounter.snapshot() retorna {reads, writes, total} plano
                 metrics['reads'] += io_stats.get('reads', 0)
                 metrics['writes'] += io_stats.get('writes', 0)
                 metrics['elapsed_ms'] += result.elapsed_ms
@@ -245,7 +228,6 @@ def medir_busquedas(
         except Exception as e:
             print(f"⚠ Error en búsqueda ({sample_name}): {e}")
     
-    # Promediar
     if metrics['count'] > 0:
         metrics['avg_reads'] = metrics['reads'] / metrics['count']
         metrics['avg_writes'] = metrics['writes'] / metrics['count']
@@ -300,7 +282,6 @@ def experimento_0_buffer_comparison():
     n = 1000
     results = {}
     
-    # ── Crear un solo engine para los 3 escenarios ──
     engine, pks, coords, io_load = setup_engine(
         csv_path=CSV_PATH,
         config=CONFIG,
@@ -312,11 +293,9 @@ def experimento_0_buffer_comparison():
     table_entry = engine._tables["exp0_buffer"]
     sample_pks = random.sample(pks, min(20, len(pks)))
     
-    # ── [1/3] SIN BufferManager (disco frío total) ──
     print("\n[1/3] Evaluando SIN BufferManager (disco frío total)...")
     metrics_no_buf = {'reads': 0, 'writes': 0, 'elapsed_ms': 0.0, 'count': 0}
     for pk in sample_pks:
-        # Invalidar TODO: BufferManager + PageManager subyacente
         table_entry.heap_pm.invalidate_cache()
         table_entry.index_pm.invalidate_cache()
         if hasattr(table_entry.heap_pm, 'pm'):
@@ -340,14 +319,11 @@ def experimento_0_buffer_comparison():
     del metrics_no_buf['count']
     results['sin_buffer'] = metrics_no_buf
     
-    # ── [2/3] CON BufferManager - FRÍO ──
     print("\n[2/3] Evaluando CON BufferManager (caché frío)...")
     metrics_buf_cold = {'reads': 0, 'writes': 0, 'elapsed_ms': 0.0, 'count': 0}
     for pk in sample_pks:
-        # Invalidar SOLO BufferManager (PageManager conserva mini-caché de 1 pg)
         table_entry.heap_pm.invalidate_cache()
         table_entry.index_pm.invalidate_cache()
-        # NO invalidamos table_entry.heap_pm.pm → simula "con buffer pero frío"
         table_entry.io_counter.reset()
         
         result = engine.search("exp0_buffer", pk)
@@ -365,15 +341,12 @@ def experimento_0_buffer_comparison():
     del metrics_buf_cold['count']
     results['con_buffer_frío'] = metrics_buf_cold
     
-    # ── [3/3] CON BufferManager - CALIENTE ──
     print("\n[3/3] Evaluando CON BufferManager (caché caliente)...")
-    # Precalentar: buscar todos los samples una vez
     for pk in sample_pks:
         engine.search("exp0_buffer", pk)
     
     metrics_buf_warm = {'reads': 0, 'writes': 0, 'elapsed_ms': 0.0, 'count': 0}
     for pk in sample_pks:
-        # NO invalidamos nada → todo en caché
         table_entry.io_counter.reset()
         
         result = engine.search("exp0_buffer", pk)
@@ -393,7 +366,6 @@ def experimento_0_buffer_comparison():
     
     limpiar_archivos_tabla("exp0_buffer")
     
-    # Mostrar tabla
     print("\n" + format_table_results({
         n: {
             "Sin Buffer": results['sin_buffer'],
@@ -445,16 +417,15 @@ def experimento_1_sequential_index():
         )
         results[n]['búsqueda_exacta'] = metrics_exact
         
-        # ── Búsqueda rango (REAL, no hardcoded) ──
+        # ── Búsqueda rango ──
         print(f"    [2/3] Búsqueda rango...")
         sorted_pks = sorted(pks)
-        # Crear varios rangos de ~100 keys para promediar
         range_samples = []
         step = max(1, len(sorted_pks) // 5)
         for i in range(0, len(sorted_pks) - 1, step):
             end_idx = min(i + 100, len(sorted_pks) - 1)
             range_samples.append((sorted_pks[i], sorted_pks[end_idx]))
-        range_samples = range_samples[:5]  # máximo 5 rangos
+        range_samples = range_samples[:5]
         
         metrics_range = medir_busquedas(
             engine,
@@ -537,7 +508,6 @@ def experimento_2_extendible_hashing():
         results[n] = {}
         
         print(f"    [1/2] Búsqueda exacta...")
-        # Extraer valores de state_id del CSV
         state_ids = []
         tmp_csv = DATA_DIR / f"_tmp_exp2_hashing_{n}.csv"
         crear_csv_temporal_n(CSV_PATH, n, tmp_csv)
@@ -602,7 +572,6 @@ def experimento_3_btree():
         results[n] = {}
         
         print(f"    [1/2] Búsqueda exacta...")
-        # Extraer valores de country_id
         country_ids = []
         tmp_csv = DATA_DIR / f"_tmp_exp3_btree_{n}.csv"
         crear_csv_temporal_n(CSV_PATH, n, tmp_csv)
@@ -742,7 +711,6 @@ def plot_buffer_comparison(results):
         
         bars = ax.bar(labels, io_values, color=colors, edgecolor='black', linewidth=1.5, alpha=0.85)
         
-        # Agregar valores en las barras
         for bar, val in zip(bars, io_values):
             height = bar.get_height()
             ax.text(bar.get_x() + bar.get_width()/2., height,
@@ -756,7 +724,6 @@ def plot_buffer_comparison(results):
         
         plt.tight_layout()
         
-        # ✓ MEJORADO: Path absoluto y validación
         output_path = PLOTS_DIR / 'fig0_buffer.png'
         plt.savefig(str(output_path), dpi=300, bbox_inches='tight')
         print(f"✓ Gráfica guardada: {output_path}")
@@ -783,7 +750,6 @@ def plot_index_figure(results: Dict, index_name: str, methods: List[str]):
         ns = sorted(results.keys())
         markers = ['o', 's', '^', 'D']
         
-        # Validar que hay datos
         if not ns:
             print(f"⚠ No hay datos para graficar {index_name}")
             return None
@@ -795,13 +761,13 @@ def plot_index_figure(results: Dict, index_name: str, methods: List[str]):
                 if n in results and method in results[n]:
                     metrics = results[n][method]
                     if metrics:
-                        io_values.append(max(metrics.get('total', 1), 1))  # Evitar log(0)
+                        io_values.append(max(metrics.get('total', 1), 1))
                     else:
                         io_values.append(1)
                 else:
                     io_values.append(1)
             
-            if any(v > 1 for v in io_values):  # Solo graficar si hay datos válidos
+            if any(v > 1 for v in io_values):
                 ax1.loglog(ns, io_values, marker=markers[i % len(markers)], label=method,
                            linewidth=2, markersize=8)
         
@@ -818,7 +784,7 @@ def plot_index_figure(results: Dict, index_name: str, methods: List[str]):
                 if n in results and method in results[n]:
                     metrics = results[n][method]
                     if metrics:
-                        time_values.append(max(metrics.get('elapsed_ms', 0.1), 0.1))  # Evitar log(0)
+                        time_values.append(max(metrics.get('elapsed_ms', 0.1), 0.1))
                     else:
                         time_values.append(0.1)
                 else:
@@ -837,7 +803,6 @@ def plot_index_figure(results: Dict, index_name: str, methods: List[str]):
         fig.suptitle(f'{index_name}', fontsize=14, fontweight='bold', y=0.99)
         plt.tight_layout()
         
-        # ✓ MEJORADO: Path absoluto y validación
         safe_name = index_name.lower().replace(' ', '_').replace('+', 'plus')
         output_path = PLOTS_DIR / f'fig_{safe_name}.png'
         
@@ -1035,7 +1000,6 @@ def export_results_to_csv(all_results: Dict):
         
         for exp_name, exp_data in all_results.items():
             if exp_name == 'exp0':
-                # Buffer comparison
                 for method, metrics in exp_data.items():
                     if metrics:
                         rows.append({
@@ -1048,7 +1012,6 @@ def export_results_to_csv(all_results: Dict):
                             'elapsed_ms': float(metrics.get('elapsed_ms', 0))
                         })
             else:
-                # Otros experimentos
                 exp_label = exp_name.replace('_', ' ').title()
                 for n, methods in exp_data.items():
                     for method, metrics in methods.items():

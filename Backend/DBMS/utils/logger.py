@@ -111,7 +111,6 @@ class QueueLogger(Logger):
     })
   
   def image(self, path: str):
-    # Enviar un mensaje estructurado indicando imagen
     self.q.put({
         "level": "IMAGE",
         "type": "image",

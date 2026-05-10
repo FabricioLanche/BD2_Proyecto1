@@ -52,7 +52,7 @@ class Scanner:
         while pos < len(self.text):
             match = None
             for name, pattern in self.patterns:
-                regex = re.compile(pattern, re.IGNORECASE) # Ignorar si es mayusculas/minusculas
+                regex = re.compile(pattern, re.IGNORECASE)
                 match = regex.match(self.text, pos)
                 if match:
                     if name != 'SPACE':

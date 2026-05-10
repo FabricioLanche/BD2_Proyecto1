@@ -46,7 +46,6 @@ class LockManager:
         
         with self._condition:
             state = self._get_state(page_id)
-            # Esperar a que no haya exclusive lock
             while state.exclusive_owner is not None:
                 self._emit(
                     "wait",
@@ -72,7 +71,6 @@ class LockManager:
                 remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
                 self._condition.wait(timeout=remaining)
             
-            # Ya no hay exclusive lock, adquirir shared
             state.shared_count += 1
             self._emit(
                 "acquired",
@@ -91,7 +89,6 @@ class LockManager:
             state = self._get_state(page_id)
             while True:
                 can_reenter = state.exclusive_owner == thread_id
-                # Solo adquirir si: no hay shared locks y (no hay exclusive o somos el owner)
                 if (state.shared_count == 0 and state.exclusive_owner is None) or can_reenter:
                     state.exclusive_owner = thread_id
                     state.exclusive_count += 1
@@ -115,7 +112,6 @@ class LockManager:
                     exclusive_count=state.exclusive_count,
                 )
                 if deadline is not None and time.monotonic() >= deadline:
-                    # Incluir métricas de lock al emitir deadlock para trazabilidad
                     self._emit(
                         "deadlock",
                         page_id,
