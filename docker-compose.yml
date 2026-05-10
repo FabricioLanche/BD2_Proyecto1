@@ -1,0 +1,27 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Backend/dockerfile
+    container_name: mini-dbms-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./Backend:/app/Backend
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Fronted/dockerfile
+    container_name: mini-dbms-frontend
+    depends_on:
+      - backend
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000/api
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./Fronted:/app
+      - /app/node_modules
+    restart: unless-stopped
