@@ -1,4 +1,5 @@
 from collections import defaultdict
+import os
 from Backend.DBMS.LockManager import LockManager, DeadlockError
 
 class PageLockStats:
@@ -33,7 +34,9 @@ class BufferManager:
         self.pm = page_manager
         self.lock_stats = lock_stats or PageLockStats()
         self.logger = logger
-        self.lock_manager = lock_manager or LockManager()
+        self.lock_manager = lock_manager or LockManager(logger=logger)
+        if logger is not None and hasattr(self.lock_manager, "logger"):
+            self.lock_manager.logger = logger
         self.lock_timeout = lock_timeout
         self._allocation_lock = None
         self.cache = {}
@@ -46,11 +49,27 @@ class BufferManager:
     def __getattr__(self, name):
         return getattr(self.pm, name)
 
+    def _emit_concurrency(self, action: str, page_id: int, **details) -> None:
+        if self.logger and getattr(self.logger, "allow_concurrency_events", False) and hasattr(self.logger, "concurrency"):
+            detail = details.pop("detail", None)
+            payload = {
+                "cache_size": len(self.cache),
+                "last_page_id_loaded": self.last_page_id_loaded,
+                "last_page_data_present": self.last_page_data is not None,
+            }
+            if hasattr(self.pm, "get_stats"):
+                payload["io_stats"] = self.pm.get_stats()
+            payload.update(details)
+            if detail is None:
+                detail = f"{os.path.basename(self.db_filename)}:{page_id}"
+            self.logger.concurrency(action, resource=f"{self.db_filename}:{page_id}", detail=detail, **payload)
+
     def read_page(self, page_id):
         self.lock_stats.acquire_shared(page_id)
         try:
             with self.lock_manager.shared(page_id, timeout=self.lock_timeout):
                 if page_id in self.cache:
+                    self._emit_concurrency("read_page", page_id, source="cache", lock_mode="shared")
                     if self.logger:
                         self.logger.debug(f"Página {page_id} servida desde la caché del PageManager para '{self.db_filename}'.")
                     data = self.cache[page_id]
@@ -64,6 +83,7 @@ class BufferManager:
                 self.cache[page_id] = data
                 self.last_page_id_loaded = page_id
                 self.last_page_data = data
+                self._emit_concurrency("read_page", page_id, source="disk", lock_mode="shared")
                 return data
         except DeadlockError:
             if self.logger:
@@ -82,9 +102,8 @@ class BufferManager:
 
                 if page_id == self.last_page_id_loaded:
                     self.last_page_data = payload
+                self._emit_concurrency("write_page", page_id, lock_mode="exclusive", bytes_written=len(data))
         except DeadlockError:
-            if self.logger:
-                self.logger.error(f"Deadlock detectado al intentar escribir la página {page_id} de '{self.db_filename}'.")
             raise
 
     def allocate_new_page(self) -> int:
@@ -100,6 +119,7 @@ class BufferManager:
             self.cache[page_id] = b'\x00' * self.PAGE_SIZE
             self.last_page_id_loaded = page_id
             self.last_page_data = self.cache[page_id]
+            self._emit_concurrency("allocate_page", page_id, lock_mode="exclusive")
             return page_id
 
     def invalidate_cache(self):

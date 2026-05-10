@@ -45,19 +45,25 @@ class ConcurrentQueueLogger:
     def __init__(self, q: queue.Queue):
         self.q = q
         self._local = threading.local()
+        self.allow_concurrency_events = True
 
-    def bind_user(self, user_id: str) -> None:
+    def bind_user(self, user_id: str, started_at: float | None = None) -> None:
         self._local.user_id = user_id
+        if started_at is not None:
+            self._local.started_at = started_at
 
     def clear_user(self) -> None:
         if hasattr(self._local, 'user_id'):
             del self._local.user_id
+        if hasattr(self._local, 'started_at'):
+            del self._local.started_at
 
     def _current_user_id(self) -> str:
         return getattr(self._local, 'user_id', 'unknown')
 
     def _push(self, payload: dict) -> None:
         payload['user_id'] = self._current_user_id()
+        payload['time_ms'] = round((time.perf_counter() - getattr(self._local, 'started_at', time.perf_counter())) * 1000, 3)
         self.q.put(payload)
 
     def log(self, level, msg: str):
@@ -94,6 +100,21 @@ class ConcurrentQueueLogger:
     def debug(self, msg: str):
         self.log('DEBUG', msg)
 
+    def concurrency(self, action: str, resource: str = '', **details):
+        payload = {
+            'level': 'CONCURRENCY',
+            'type': 'concurrency',
+            'action': action,
+            'resource': resource,
+        }
+        payload.update(details)
+        if 'detail' not in payload:
+            detail_bits = [action]
+            if resource:
+                detail_bits.append(resource)
+            payload['detail'] = ' | '.join(detail_bits)
+        self._push(payload)
+
 @router.post("/query")
 def ejecutar_query(data: QueryRequest):
 
@@ -129,6 +150,8 @@ def ejecutar_query(data: QueryRequest):
                 yield json.dumps(item, ensure_ascii=False, default=_json_bytes_default) + "\n"
             elif item.get("type") == "image":
                 yield json.dumps(item, ensure_ascii=False, default=_json_bytes_default) + "\n"
+            elif item.get("type") == "concurrency":
+                yield json.dumps(item, ensure_ascii=False, default=_json_bytes_default) + "\n"
             else:
                 msg = item.get('message')
                 if msg is None:
@@ -159,11 +182,12 @@ def ejecutar_query_concurrente(data: ConcurrentQueryRequest):
     total_users = len(normalized_users)
 
     def run_user(user: ConcurrentUserRequest):
-        logger.bind_user(user.user_id or 'unknown')
         started_at = time.perf_counter()
+        logger.bind_user(user.user_id or 'unknown', started_at)
         log_queue.put({
             'type': 'start',
             'user_id': logger._current_user_id(),
+            'time_ms': 0.0,
             'query': user.query,
         })
 
@@ -176,6 +200,7 @@ def ejecutar_query_concurrente(data: ConcurrentQueryRequest):
             log_queue.put({
                 'type': 'done',
                 'user_id': logger._current_user_id(),
+                'time_ms': round((time.perf_counter() - started_at) * 1000, 3),
                 'elapsed_ms': round(elapsed_ms, 3),
             })
             logger.clear_user()

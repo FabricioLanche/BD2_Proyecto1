@@ -20,8 +20,11 @@ class LogLevel(Enum):
   DEBUG = "DEBUG"
   IMAGE = "IMAGE"
   RESULT = "RESULT"
+  CONCURRENCY = "CONCURRENCY"
 
 class Logger:
+  allow_concurrency_events = False
+
   def log(self, level: LogLevel, msg: str):
     pass
 
@@ -31,6 +34,10 @@ class Logger:
 
   def image(self, path: str):
     """Encola una referencia a una imagen generada por el servidor (path local)."""
+    pass
+
+  def concurrency(self, action: str, resource: str = "", **details):
+    """Encola un evento estructurado de concurrencia."""
     pass
 
   def info(self, msg: str):
@@ -46,10 +53,14 @@ class Logger:
     self.log(LogLevel.DEBUG, msg)
 
 class ConsoleLogger(Logger):
+  allow_concurrency_events = False
+
   def log(self, level: LogLevel, msg: str):
     print(f"[{level.value}]: {msg}")
 
-  def result(self, columns: list, rows: list):
+  def result(self, columns: list, rows: list, description: str = ""):
+    if description:
+      print(f"[RESULT]: {description}")
     print(f"Columnas: {', '.join(columns)}")
     for row in rows:
       print(f"  {row}")
@@ -57,9 +68,19 @@ class ConsoleLogger(Logger):
   def image(self, path: str):
     print(f"[IMAGE]: {path}")
 
+  def concurrency(self, action: str, resource: str = "", **details):
+    suffix = []
+    if resource:
+      suffix.append(f"resource={resource}")
+    for key, value in details.items():
+      suffix.append(f"{key}={value}")
+    extra = f" | {' '.join(suffix)}" if suffix else ""
+    print(f"[CONCURRENCY]: {action}{extra}")
+
 class QueueLogger(Logger):
   def __init__(self, q=None):
     self.q = q or queue.Queue()
+    self.allow_concurrency_events = False
 
   def log(self, level: LogLevel, msg: str):
     self.q.put({
@@ -67,7 +88,7 @@ class QueueLogger(Logger):
         "message": msg
     })
 
-  def result(self, columns: list, rows: list):
+  def result(self, columns: list, rows: list, description: str = ""):
     normalized_columns = [_normalize_value(column) for column in columns]
     normalized_rows = []
 
@@ -85,7 +106,8 @@ class QueueLogger(Logger):
         "level": "RESULT",
         "type": "table",
         "columns": normalized_columns,
-        "rows": normalized_rows
+        "rows": normalized_rows,
+        "description": _normalize_value(description),
     })
   
   def image(self, path: str):
@@ -95,3 +117,13 @@ class QueueLogger(Logger):
         "type": "image",
         "path": path
     })
+
+  def concurrency(self, action: str, resource: str = "", **details):
+    payload = {
+        "level": "CONCURRENCY",
+        "type": "concurrency",
+        "action": _normalize_value(action),
+        "resource": _normalize_value(resource),
+    }
+    payload.update({key: _normalize_value(value) for key, value in details.items()})
+    self.q.put(payload)

@@ -69,6 +69,13 @@ class DatabaseEngine:
         self.logger = logger or ConsoleLogger()
         self.lock_stats = PageLockStats()
 
+    def _emit_concurrency(self, action: str, table_name: str, **details) -> None:
+        if self.logger and getattr(self.logger, "allow_concurrency_events", False) and hasattr(self.logger, "concurrency"):
+            detail = details.pop("detail", None)
+            if detail is None:
+                detail = f"{action} table:{table_name}"
+            self.logger.concurrency(action, resource=f"table:{table_name}", detail=detail, **details)
+
     def _make_buffer_manager(self, filename: str, io_counter: IOCounter, page_size: int = None) -> BufferManager:
         page_manager = PageManager(filename, io_counter, page_size=page_size)
         return BufferManager(page_manager, self.lock_stats, logger=self.logger)
@@ -239,12 +246,37 @@ class DatabaseEngine:
         t = self._get_table(table_name)
         t0 = time.perf_counter()
         self._reset_io(t)
-
-        rid = t.heap.insert(record)
-
         pk_idx = t.config.column_map[t.pk_col]
         pk_val = self._decode_value(record.data_tuple[pk_idx])
+
+        self._emit_concurrency(
+            "insert_begin",
+            table_name,
+            pk=pk_val,
+            detail=f"insert begin pk={pk_val}",
+            heap_io=t.heap_pm.get_stats() if hasattr(t.heap_pm, "get_stats") else None,
+            index_io=t.index_pm.get_stats() if hasattr(t.index_pm, "get_stats") else None,
+        )
+
+        rid = t.heap.insert(record)
+        self._emit_concurrency(
+            "heap_inserted",
+            table_name,
+            pk=pk_val,
+            rid=rid,
+            detail=f"heap inserted rid={rid}",
+            heap_io=t.heap_pm.get_stats() if hasattr(t.heap_pm, "get_stats") else None,
+        )
+
         t.index.add(pk_val, rid)
+        self._emit_concurrency(
+            "index_updated",
+            table_name,
+            pk=pk_val,
+            rid=rid,
+            detail=f"sequential index updated rid={rid}",
+            index_io=t.index_pm.get_stats() if hasattr(t.index_pm, "get_stats") else None,
+        )
 
         for col_name, h_index in t.hash_indices.items():
             col_idx = t.config.column_map[col_name]
@@ -261,7 +293,23 @@ class DatabaseEngine:
             t.rtree.insert(point, rid)
 
         elapsed = (time.perf_counter() - t0) * 1000
+        self._emit_concurrency(
+            "flush_begin",
+            table_name,
+            pk=pk_val,
+            elapsed_ms=round(elapsed, 3),
+            detail=f"flush begin pk={pk_val}",
+        )
         self.flush_table(table_name)
+        self._emit_concurrency(
+            "flush_end",
+            table_name,
+            pk=pk_val,
+            elapsed_ms=round(elapsed, 3),
+            detail=f"flush end pk={pk_val}",
+            heap_io=t.heap_pm.get_stats() if hasattr(t.heap_pm, "get_stats") else None,
+            index_io=t.index_pm.get_stats() if hasattr(t.index_pm, "get_stats") else None,
+        )
         return QueryResult(rid, t.io_counter.snapshot(), elapsed, "INSERT")
 
     def search(self, table_name: str, pk) -> QueryResult:
@@ -403,6 +451,13 @@ class DatabaseEngine:
 
     def flush_table(self, table_name: str) -> None:
         t = self._get_table(table_name)
+        self._emit_concurrency(
+            "flush_table_begin",
+            table_name,
+            detail=f"flush_table begin {table_name}",
+            heap_io=t.heap_pm.get_stats() if hasattr(t.heap_pm, "get_stats") else None,
+            index_io=t.index_pm.get_stats() if hasattr(t.index_pm, "get_stats") else None,
+        )
         t.heap.flush_metadata()
         t.index.flush_metadata()
         for h_index in t.hash_indices.values():
@@ -410,6 +465,13 @@ class DatabaseEngine:
         for b_index in t.btree_indices.values():
             b_index.flush_metadata()
         self.logger.debug(f"Flush completado para '{table_name}'.")
+        self._emit_concurrency(
+            "flush_table_end",
+            table_name,
+            detail=f"flush_table end {table_name}",
+            heap_io=t.heap_pm.get_stats() if hasattr(t.heap_pm, "get_stats") else None,
+            index_io=t.index_pm.get_stats() if hasattr(t.index_pm, "get_stats") else None,
+        )
 
     def flush_all(self) -> None:
         self.logger.info(f"Flushing todas las tablas ({len(self._tables)})...")

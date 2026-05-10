@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { deleteDataset, executeConcurrentQueries, executeQuery, fetchDatasets, restartBackend, uploadDataset, type QueryResultTable } from './api/api'
+import { deleteDataset, executeConcurrentQueries, executeQuery, fetchDatasets, restartBackend, uploadDataset, type QueryConcurrencyTable, type QueryResultTable } from './api/api'
 import { Button } from './components/Button'
 import { Card } from './components/Card'
 import { DatasetsPanel } from './components/DatasetsPanel'
@@ -53,6 +53,7 @@ export default function App() {
   const [datasets, setDatasets] = useState<string[]>([])
   const [logs, setLogs] = useState<string>('')
   const [resultTable, setResultTable] = useState<QueryResultTable | null>(null)
+  const [concurrencyTable, setConcurrencyTable] = useState<QueryConcurrencyTable | null>(null)
   const [image, setImage] = useState<string | null>(null)
   const [outputView, setOutputView] = useState<OutputView>('logs')
 
@@ -278,17 +279,20 @@ export default function App() {
     setStatusMessage('')
     setLogs('')
     setResultTable(null)
+    setConcurrencyTable(null)
     setImage(null)
 
-    void executeConcurrentQueries(users, ({ logs: nextLogs, resultTable: nextResultTable, image: nextImage }) => {
+    void executeConcurrentQueries(users, ({ logs: nextLogs, resultTable: nextResultTable, concurrencyTable: nextConcurrencyTable, image: nextImage }) => {
       setLogs(nextLogs)
       setResultTable(nextResultTable)
+      setConcurrencyTable(nextConcurrencyTable ?? null)
       setImage(nextImage ?? null)
-      if (nextImage || nextResultTable) setOutputView('results')
+      if (nextImage || nextResultTable || nextConcurrencyTable) setOutputView('results')
     })
       .then((result) => {
         setLogs(result.logs)
         setResultTable(result.resultTable)
+        setConcurrencyTable(result.concurrencyTable ?? null)
         setImage(result.image ?? null)
       })
       .catch(() => {
@@ -317,24 +321,28 @@ export default function App() {
     setStatusMessage('')
     setLogs('')
     setResultTable(null)
+    setConcurrencyTable(null)
     setImage(null)
     try {
       const queryToExecute = activeTab.selection.trim() || activeTab.query
 
-      const result = await executeQuery(queryToExecute, ({ logs: nextLogs, resultTable: nextResultTable, image: nextImage }) => {
+      const result = await executeQuery(queryToExecute, ({ logs: nextLogs, resultTable: nextResultTable, concurrencyTable: nextConcurrencyTable, image: nextImage }) => {
         setLogs(nextLogs)
         setResultTable(nextResultTable)
+        setConcurrencyTable(nextConcurrencyTable ?? null)
         setImage(nextImage ?? null)
         // Si llega una imagen o tabla, cambiar a la vista Results automáticamente
-        if (nextImage || nextResultTable) setOutputView('results')
+        if (nextImage || nextResultTable || nextConcurrencyTable) setOutputView('results')
       })
 
       setLogs(result.logs)
       setResultTable(result.resultTable)
+      setConcurrencyTable(result.concurrencyTable ?? null)
       setImage(result.image ?? null)
     } catch (error) {
       setLogs('')
       setResultTable(null)
+      setConcurrencyTable(null)
       setStatusMessage('Ocurrio un error al ejecutar la query.')
     } finally {
       setIsExecuting(false)
@@ -459,6 +467,7 @@ export default function App() {
       <OutputPanel
         logs={logs}
         resultTable={resultTable}
+        concurrencyTable={concurrencyTable}
         image={image}
         view={outputView}
         onViewChange={setOutputView}

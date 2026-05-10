@@ -19,9 +19,39 @@ class DBMSEngine:
         self.page_size = None
         self.logger.info("Catalog cargado exitosamente!")
 
+    def _sync_storage_logger(self) -> None:
+        self.storage.logger = self.logger
+
+        for table in self.storage._tables.values():
+            for buffer_manager in [table.heap_pm, table.index_pm]:
+                buffer_manager.logger = self.logger
+                if hasattr(buffer_manager, "lock_manager"):
+                    buffer_manager.lock_manager.logger = self.logger
+
+            # Sincronizar LockManager del SequentialIndex (PK index)
+            if hasattr(table.index, "lock_manager"):
+                table.index.lock_manager.logger = self.logger
+
+            for index in table.hash_indices.values():
+                if hasattr(index, "pm"):
+                    index.pm.logger = self.logger
+                    if hasattr(index.pm, "lock_manager"):
+                        index.pm.lock_manager.logger = self.logger
+
+            for index in table.btree_indices.values():
+                if hasattr(index, "pm"):
+                    index.pm.logger = self.logger
+                    if hasattr(index.pm, "lock_manager"):
+                        index.pm.lock_manager.logger = self.logger
+
+            if table.rtree and hasattr(table.rtree, "page_manager"):
+                table.rtree.page_manager.logger = self.logger
+                if hasattr(table.rtree.page_manager, "lock_manager"):
+                    table.rtree.page_manager.lock_manager.logger = self.logger
+
     def set_logger(self, logger):
         self.logger = logger or ConsoleLogger()
-        self.storage.logger = self.logger
+        self._sync_storage_logger()
 
     def execute_query(self, sql_string):
         try:
@@ -291,7 +321,6 @@ class DBMSEngine:
         try:
             result = self.storage.insert(table_name, record)
             self.logger.info(f"{result}")
-            self.storage.flush_table(table_name)
         except Exception as e:
             self.logger.error(f"Error en el Storage Engine durante INSERT en '{table_name}': {e}")
 

@@ -817,6 +817,15 @@ body {
   z-index: 1;
 }
 
+/* Concurrency row highlights */
+.output-table tr.concurrency-deadlock {
+  background-color: #ffe7e7; /* rojo pastel */
+}
+
+.output-table tr.concurrency-wait {
+  background-color: #fff9e0; /* amarillo pastel */
+}
+
 .output-empty-state {
   flex: 1;
   min-height: 140px;

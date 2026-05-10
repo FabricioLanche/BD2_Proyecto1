@@ -88,15 +88,24 @@ class SequentialIndex:
     
     def flush_metadata(self) -> None:
         # flushing -> Escribir todas las páginas en cache a disco
+        # IMPORTANTE: Preparar todo ANTES de adquirir el lock
+        pages_to_write = {}
+        if self._dirty_pages:
+            for page_id in sorted(self._dirty_pages):
+                if page_id in self._page_cache:
+                    pages_to_write[page_id] = bytes(self._page_cache[page_id])
+        
+        # Ahora escribir SIN mantener el lock exclusivo
+        for page_id, data in pages_to_write.items():
+            self.pm.write_page(page_id, data)
+        
+        # Limpiar cache solo después de escribir exitosamente
+        if pages_to_write:
+            self._page_cache.clear()
+            self._dirty_pages.clear()
+        
+        # Finalmente, persistir metadata CON el lock
         with self._exclusive_write_lock():
-            if self._dirty_pages:
-                for page_id in sorted(self._dirty_pages):
-                    if page_id in self._page_cache:
-                        self.pm.write_page(page_id, bytes(self._page_cache[page_id]))
-                
-                self._page_cache.clear()
-                self._dirty_pages.clear()
-            
             self._persist_metadata()
     
     def _build_sparse_index(self) -> List[Tuple[int, int]]:

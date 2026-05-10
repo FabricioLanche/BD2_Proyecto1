@@ -18,9 +18,17 @@ class _PageLockState:
 
 
 class LockManager:
-    def __init__(self):
+    def __init__(self, logger=None):
         self._condition = threading.Condition(threading.RLock())
         self._locks: dict[int, _PageLockState] = {}
+        self.logger = logger
+
+    def _emit(self, action: str, page_id: int, mode: str, **details) -> None:
+        if self.logger and getattr(self.logger, "allow_concurrency_events", False) and hasattr(self.logger, "concurrency"):
+            detail = details.pop("detail", None)
+            if detail is None:
+                detail = f"{action} {mode} page:{page_id}"
+            self.logger.concurrency(action, resource=f"page:{page_id}", mode=mode, detail=detail, **details)
 
     def _get_state(self, page_id: int) -> _PageLockState:
         state = self._locks.get(page_id)
@@ -35,16 +43,45 @@ class LockManager:
     def acquire_shared(self, page_id: int, timeout: float | None = None) -> None:
         deadline = None if timeout is None else time.monotonic() + timeout
         thread_id = self._thread_id()
-
+        
         with self._condition:
             state = self._get_state(page_id)
-            while state.exclusive_owner is not None and state.exclusive_owner != thread_id:
+            # Esperar a que no haya exclusive lock
+            while state.exclusive_owner is not None:
+                self._emit(
+                    "wait",
+                    page_id,
+                    "shared",
+                    thread_id=thread_id,
+                    owner=state.exclusive_owner,
+                    shared_count=state.shared_count,
+                    exclusive_count=state.exclusive_count,
+                )
                 if deadline is not None and time.monotonic() >= deadline:
-                    raise DeadlockError(f"Deadlock: timeout esperando lock shared para página {page_id}")
+                    self._emit(
+                        "deadlock",
+                        page_id,
+                        "shared",
+                        thread_id=thread_id,
+                        owner=state.exclusive_owner,
+                        shared_count=state.shared_count,
+                        exclusive_count=state.exclusive_count,
+                    )
+                    raise DeadlockError(f"timeout esperando lock shared page:{page_id}")
+                
                 remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
                 self._condition.wait(timeout=remaining)
-
+            
+            # Ya no hay exclusive lock, adquirir shared
             state.shared_count += 1
+            self._emit(
+                "acquired",
+                page_id,
+                "shared",
+                thread_id=thread_id,
+                shared_count=state.shared_count,
+                exclusive_count=state.exclusive_count,
+            )
 
     def acquire_exclusive(self, page_id: int, timeout: float | None = None) -> None:
         deadline = None if timeout is None else time.monotonic() + timeout
@@ -54,14 +91,41 @@ class LockManager:
             state = self._get_state(page_id)
             while True:
                 can_reenter = state.exclusive_owner == thread_id
-                no_shared_owners = state.shared_count == 0 or (can_reenter and state.shared_count == 1)
-                if can_reenter or (state.exclusive_owner is None and no_shared_owners):
+                # Solo adquirir si: no hay shared locks y (no hay exclusive o somos el owner)
+                if (state.shared_count == 0 and state.exclusive_owner is None) or can_reenter:
                     state.exclusive_owner = thread_id
                     state.exclusive_count += 1
+                    self._emit(
+                        "acquired",
+                        page_id,
+                        "exclusive",
+                        thread_id=thread_id,
+                        shared_count=state.shared_count,
+                        exclusive_count=state.exclusive_count,
+                    )
                     return
 
+                self._emit(
+                    "wait",
+                    page_id,
+                    "exclusive",
+                    thread_id=thread_id,
+                    owner=state.exclusive_owner,
+                    shared_count=state.shared_count,
+                    exclusive_count=state.exclusive_count,
+                )
                 if deadline is not None and time.monotonic() >= deadline:
-                    raise DeadlockError(f"Deadlock: timeout esperando lock exclusive para página {page_id}")
+                    # Incluir métricas de lock al emitir deadlock para trazabilidad
+                    self._emit(
+                        "deadlock",
+                        page_id,
+                        "exclusive",
+                        thread_id=thread_id,
+                        owner=state.exclusive_owner,
+                        shared_count=state.shared_count,
+                        exclusive_count=state.exclusive_count,
+                    )
+                    raise DeadlockError(f"timeout esperando lock exclusive page:{page_id}")
 
                 remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
                 self._condition.wait(timeout=remaining)
@@ -73,6 +137,13 @@ class LockManager:
                 return
 
             state.shared_count -= 1
+            self._emit(
+                "released",
+                page_id,
+                "shared",
+                shared_count=state.shared_count,
+                exclusive_count=state.exclusive_count,
+            )
             if state.shared_count == 0 and state.exclusive_owner is None:
                 self._locks.pop(page_id, None)
             self._condition.notify_all()
@@ -88,6 +159,13 @@ class LockManager:
                 state.exclusive_owner = None
                 if state.shared_count == 0:
                     self._locks.pop(page_id, None)
+            self._emit(
+                "released",
+                page_id,
+                "exclusive",
+                shared_count=state.shared_count,
+                exclusive_count=state.exclusive_count,
+            )
             self._condition.notify_all()
 
     @contextmanager

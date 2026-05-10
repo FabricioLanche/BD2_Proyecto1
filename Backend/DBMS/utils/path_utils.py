@@ -1,10 +1,9 @@
 from pathlib import Path
 
-DBMS_DIR = Path(__file__).resolve().parent
+DBMS_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = DBMS_DIR / "data"
 DATASETS_DIR = DBMS_DIR / "datasets"
 GRAPH_DIR = DBMS_DIR / "graphs"
-
 
 def _normalize_path(raw_path: str) -> Path:
     return Path(str(raw_path).strip().strip('"').strip("'"))
