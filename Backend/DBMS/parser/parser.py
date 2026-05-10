@@ -28,7 +28,30 @@ class SQLParser:
         if t == 'SELECT': return self.select_stmt()
         if t == 'INSERT': return self.insert_stmt()
         if t == 'DELETE': return self.delete_stmt()
+        if t == 'VISUALIZE': return self.visualize_stmt()
+        if t == 'PAGESIZE': return self.pagesize_stmt()
         raise SyntaxError(f"Sentencia SQL no reconocida iniciando con: {t}")
+
+    def visualize_stmt(self):
+        # Sintaxis: VISUALIZE RTREE [table_name]
+        self.match('VISUALIZE')
+        tech = self.match('TECH').value.upper()
+        if tech != 'RTREE':
+            raise SyntaxError("Sólo se soporta VISUALIZE RTREE")
+
+        table_name = None
+        if self.current().type == 'ID':
+            table_name = self.match('ID').value
+
+        return {"action": "VISUALIZE", "object": "RTREE", "table": table_name}
+
+    def pagesize_stmt(self):
+        # Sintaxis simple: PAGESIZE <NUM>
+        self.match('PAGESIZE')
+        if self.current().type != 'NUM':
+            raise SyntaxError('Se esperaba un número para PAGESIZE')
+        size_token = self.match('NUM')
+        return {"action": "SET_PAGESIZE", "size": int(float(size_token.value))}
 
     def create_stmt(self):
         self.match('CREATE')
@@ -117,9 +140,19 @@ class SQLParser:
         
         elif curr.type == 'BETWEEN':
             self.match('BETWEEN')
-            v1 = float(self.match('NUM').value)
+            
+            if self.current().type == 'NUM':
+                v1 = float(self.match('NUM').value)
+            else:
+                v1 = self.match('STRING').value.strip("'\"")
+
             self.match('AND')
-            v2 = float(self.match('NUM').value)
+
+            if self.current().type == 'NUM':
+                v2 = float(self.match('NUM').value)
+            else:
+                v2 = self.match('STRING').value.strip("'\"")
+
             return {"action": "SELECT", "type": "RANGE", "table": table, "col": col, "range": [v1, v2]}
             
         elif curr.type == 'IN':

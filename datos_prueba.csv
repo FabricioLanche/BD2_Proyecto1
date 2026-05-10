@@ -1,4 +1,7 @@
-id,nombre,latitud,longitud
-1,Lima,-12.04,-77.02
-2,Cusco,-13.52,-71.96
-3,Trujillo,-8.11,-79.02
+codigo,nombre,categoria,capacidad,lat,lon
+"L-01","Museo MAC","Museo",500,-12.14,-77.01
+"L-02","Museo de Arte","Museo",1200,-12.15,-77.02
+"L-03","Museo de Oro","Museo",800,-12.11,-76.99
+"L-04","Parque Kennedy","Parque",5000,-12.12,-77.03
+"L-05","Parque de las Leyendas","Parque",10000,-12.07,-77.08
+"L-06","Campus UTEC","Universidad",3000,-12.14,-77.02

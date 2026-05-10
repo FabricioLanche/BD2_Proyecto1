@@ -1,5 +1,7 @@
 .venv
+.vscode
 data
+datasets
 graphs
 __pycache__
 
@@ -8,3 +10,7 @@ __pycache__
 *.bin
 *.tmp
 *.csv
+*.dat
+*.hash
+*.hashmeta
+*.bin

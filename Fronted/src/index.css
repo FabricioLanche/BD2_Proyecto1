@@ -317,6 +317,38 @@ body {
   align-items: center;
 }
 
+.output-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  border: 2px solid rgba(12, 15, 18, 0.12);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.output-toggle-button {
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.output-toggle-button.is-active {
+  background: var(--chip);
+  color: #fff;
+}
+
+.output-toggle-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .panel-chip {
   border-radius: 999px;
   background: var(--chip);
@@ -369,6 +401,14 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+.panel-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .panel-hint {
@@ -736,6 +776,99 @@ body {
   min-width: 0;
   word-break: break-word;
   white-space: pre-wrap;
+}
+
+.output-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--panel-line);
+  background: #fff;
+}
+
+.output-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+  font-size: 13px;
+}
+
+.output-table th,
+.output-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(12, 15, 18, 0.1);
+  border-right: 1px solid rgba(12, 15, 18, 0.08);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.output-table th:last-child,
+.output-table td:last-child {
+  border-right: 0;
+}
+
+.output-table thead th {
+  position: sticky;
+  top: 0;
+  background: #f5fbfc;
+  color: var(--ink);
+  z-index: 1;
+}
+
+/* Concurrency row highlights */
+.output-table tr.concurrency-deadlock {
+  background-color: #ffe7e7; /* rojo pastel */
+}
+
+.output-table tr.concurrency-wait {
+  background-color: #fff9e0; /* amarillo pastel */
+}
+
+.output-empty-state {
+  flex: 1;
+  min-height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  border: 2px dashed rgba(12, 15, 18, 0.18);
+  color: var(--ink-soft);
+  background: #fff;
+  padding: 16px;
+  text-align: center;
+}
+
+/* Image output styling */
+.output-image-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--panel-line);
+  background: #fff;
+  padding: 12px;
+}
+
+.output-image {
+  max-width: 100%;
+  max-height: calc(100vh - 360px);
+  width: auto;
+  height: auto;
+  display: block;
+  object-fit: contain;
+  margin: 0 auto;
+  box-shadow: 0 8px 20px rgba(7, 25, 30, 0.08);
+}
+
+.output-image-actions {
+  margin-top: 8px;
+  font-size: 13px;
 }
 
 /* Button Styles */

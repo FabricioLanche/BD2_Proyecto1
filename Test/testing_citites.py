@@ -5,8 +5,8 @@ import os
 import tempfile
 import glob
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from database_engine import DatabaseEngine
-from organization.data_structures import TableConfig, Record
+from Backend.DBMS.database_engine import DatabaseEngine
+from Backend.DBMS.organization.data_structures import TableConfig, Record
 
 def test_large_dataset_100k():
     print("\n" + "="*70)

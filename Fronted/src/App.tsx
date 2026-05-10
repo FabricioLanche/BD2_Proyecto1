@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { deleteDataset, executeQuery, fetchDatasets, restartBackend, uploadDataset } from './api/api'
+import { deleteDataset, executeConcurrentQueries, executeQuery, fetchDatasets, restartBackend, uploadDataset, type QueryConcurrencyTable, type QueryResultTable } from './api/api'
 import { Button } from './components/Button'
 import { Card } from './components/Card'
 import { DatasetsPanel } from './components/DatasetsPanel'
@@ -24,7 +24,10 @@ type QueryTab = {
   id: string
   title: string
   query: string
+  selection: string
 }
+
+type OutputView = 'logs' | 'results'
 
 type DragState = {
   type: 'vertical' | 'horizontal' | null
@@ -36,8 +39,9 @@ type DragState = {
 
 const createTab = (index: number): QueryTab => ({
   id: `tab-${index}-${Date.now()}`,
-  title: `Query ${index}`,
+  title: `User ${index}`,
   query: '',
+  selection: '',
 })
 
 export default function App() {
@@ -47,7 +51,11 @@ export default function App() {
 
   // Datasets & Output state
   const [datasets, setDatasets] = useState<string[]>([])
-  const [output, setOutput] = useState<string>('')
+  const [logs, setLogs] = useState<string>('')
+  const [resultTable, setResultTable] = useState<QueryResultTable | null>(null)
+  const [concurrencyTable, setConcurrencyTable] = useState<QueryConcurrencyTable | null>(null)
+  const [image, setImage] = useState<string | null>(null)
+  const [outputView, setOutputView] = useState<OutputView>('logs')
 
   // Loading states
   const [isLoadingDatasets, setIsLoadingDatasets] = useState(false)
@@ -252,9 +260,58 @@ export default function App() {
     })
   }
 
+  const handleExecuteAllUsers = () => {
+    if (isExecuting) return
+
+    const users = tabs
+      .map((tab) => ({
+        user_id: tab.title.trim() || 'User',
+        query: tab.selection.trim() || tab.query.trim(),
+      }))
+      .filter((tab) => tab.query.length > 0)
+
+    if (!users.length) {
+      setStatusMessage('No hay consultas para ejecutar.')
+      return
+    }
+
+    setIsExecuting(true)
+    setStatusMessage('')
+    setLogs('')
+    setResultTable(null)
+    setConcurrencyTable(null)
+    setImage(null)
+
+    void executeConcurrentQueries(users, ({ logs: nextLogs, resultTable: nextResultTable, concurrencyTable: nextConcurrencyTable, image: nextImage }) => {
+      setLogs(nextLogs)
+      setResultTable(nextResultTable)
+      setConcurrencyTable(nextConcurrencyTable ?? null)
+      setImage(nextImage ?? null)
+      if (nextImage || nextResultTable || nextConcurrencyTable) setOutputView('results')
+    })
+      .then((result) => {
+        setLogs(result.logs)
+        setResultTable(result.resultTable)
+        setConcurrencyTable(result.concurrencyTable ?? null)
+        setImage(result.image ?? null)
+      })
+      .catch(() => {
+        setStatusMessage('Ocurrio un error al ejecutar las consultas concurrentes.')
+      })
+      .finally(() => {
+        setIsExecuting(false)
+      })
+  }
+
   const handleQueryChange = (value: string) => {
     setTabs((prev) =>
       prev.map((tab) => (tab.id === activeId ? { ...tab, query: value } : tab)),
+    )
+  }
+
+  const handleSelectionChange = (selection: string) => {
+    setTabs((prev) =>
+      prev.map((tab) => (tab.id === activeId ? { ...tab, selection } : tab)),
     )
   }
 
@@ -262,11 +319,30 @@ export default function App() {
     if (!activeTab) return
     setIsExecuting(true)
     setStatusMessage('')
+    setLogs('')
+    setResultTable(null)
+    setConcurrencyTable(null)
+    setImage(null)
     try {
-      const result = await executeQuery(activeTab.query)
-      setOutput(result)
+      const queryToExecute = activeTab.selection.trim() || activeTab.query
+
+      const result = await executeQuery(queryToExecute, ({ logs: nextLogs, resultTable: nextResultTable, concurrencyTable: nextConcurrencyTable, image: nextImage }) => {
+        setLogs(nextLogs)
+        setResultTable(nextResultTable)
+        setConcurrencyTable(nextConcurrencyTable ?? null)
+        setImage(nextImage ?? null)
+        // Si llega una imagen o tabla, cambiar a la vista Results automáticamente
+        if (nextImage || nextResultTable || nextConcurrencyTable) setOutputView('results')
+      })
+
+      setLogs(result.logs)
+      setResultTable(result.resultTable)
+      setConcurrencyTable(result.concurrencyTable ?? null)
+      setImage(result.image ?? null)
     } catch (error) {
-      setOutput('')
+      setLogs('')
+      setResultTable(null)
+      setConcurrencyTable(null)
       setStatusMessage('Ocurrio un error al ejecutar la query.')
     } finally {
       setIsExecuting(false)
@@ -321,7 +397,12 @@ export default function App() {
     setStatusMessage('')
     try {
       const message = await restartBackend()
-      setOutput(message)
+      setStatusMessage(message)
+      // Limpiar todos los remanentes de ejecuciones anteriores
+      setLogs('')
+      setResultTable(null)
+      setImage(null)
+      setOutputView('logs')
       await loadDatasets()
     } catch (error) {
       setStatusMessage('No se pudo reiniciar el backend.')
@@ -352,12 +433,17 @@ export default function App() {
           onAdd={handleAddTab}
           onClose={handleCloseTab}
         />
-        <QueryEditor value={activeTab?.query ?? ''} onChange={handleQueryChange} />
+        <QueryEditor value={activeTab?.query ?? ''} onChange={handleQueryChange} onSelectionChange={handleSelectionChange} />
         <div className="panel-footer">
           <p className="panel-hint">Tip: Usa multiples pestañas para organizar tus consultas.</p>
-          <Button variant="primary" onClick={handleExecute} disabled={isExecuting}>
-            {isExecuting ? 'Ejecutando...' : 'Ejecutar'}
-          </Button>
+          <div className="panel-footer-actions">
+            <Button variant="secondary" onClick={handleExecuteAllUsers}>
+              Ejecutar todos
+            </Button>
+            <Button variant="primary" onClick={handleExecute} disabled={isExecuting}>
+              {isExecuting ? 'Ejecutando...' : 'Ejecutar'}
+            </Button>
+          </div>
         </div>
       </div>
     </Card>
@@ -378,7 +464,16 @@ export default function App() {
   // Right bottom panel - wrap in Card to apply collapsed styling
   const rightBottomPanel = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, minWidth: 0 }}>
-      <OutputPanel output={output} isRestarting={isRestarting} onRestart={handleRestart} />
+      <OutputPanel
+        logs={logs}
+        resultTable={resultTable}
+        concurrencyTable={concurrencyTable}
+        image={image}
+        view={outputView}
+        onViewChange={setOutputView}
+        isRestarting={isRestarting}
+        onRestart={handleRestart}
+      />
     </div>
   )
 
