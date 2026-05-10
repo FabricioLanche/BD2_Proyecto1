@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { deleteDataset, executeQuery, fetchDatasets, restartBackend, uploadDataset, type QueryResultTable } from './api/api'
+import { deleteDataset, executeConcurrentQueries, executeQuery, fetchDatasets, restartBackend, uploadDataset, type QueryResultTable } from './api/api'
 import { Button } from './components/Button'
 import { Card } from './components/Card'
 import { DatasetsPanel } from './components/DatasetsPanel'
@@ -39,7 +39,7 @@ type DragState = {
 
 const createTab = (index: number): QueryTab => ({
   id: `tab-${index}-${Date.now()}`,
-  title: `Query ${index}`,
+  title: `User ${index}`,
   query: '',
   selection: '',
 })
@@ -259,6 +259,46 @@ export default function App() {
     })
   }
 
+  const handleExecuteAllUsers = () => {
+    if (isExecuting) return
+
+    const users = tabs
+      .map((tab) => ({
+        user_id: tab.title.trim() || 'User',
+        query: tab.selection.trim() || tab.query.trim(),
+      }))
+      .filter((tab) => tab.query.length > 0)
+
+    if (!users.length) {
+      setStatusMessage('No hay consultas para ejecutar.')
+      return
+    }
+
+    setIsExecuting(true)
+    setStatusMessage('')
+    setLogs('')
+    setResultTable(null)
+    setImage(null)
+
+    void executeConcurrentQueries(users, ({ logs: nextLogs, resultTable: nextResultTable, image: nextImage }) => {
+      setLogs(nextLogs)
+      setResultTable(nextResultTable)
+      setImage(nextImage ?? null)
+      if (nextImage || nextResultTable) setOutputView('results')
+    })
+      .then((result) => {
+        setLogs(result.logs)
+        setResultTable(result.resultTable)
+        setImage(result.image ?? null)
+      })
+      .catch(() => {
+        setStatusMessage('Ocurrio un error al ejecutar las consultas concurrentes.')
+      })
+      .finally(() => {
+        setIsExecuting(false)
+      })
+  }
+
   const handleQueryChange = (value: string) => {
     setTabs((prev) =>
       prev.map((tab) => (tab.id === activeId ? { ...tab, query: value } : tab)),
@@ -388,9 +428,14 @@ export default function App() {
         <QueryEditor value={activeTab?.query ?? ''} onChange={handleQueryChange} onSelectionChange={handleSelectionChange} />
         <div className="panel-footer">
           <p className="panel-hint">Tip: Usa multiples pestañas para organizar tus consultas.</p>
-          <Button variant="primary" onClick={handleExecute} disabled={isExecuting}>
-            {isExecuting ? 'Ejecutando...' : 'Ejecutar'}
-          </Button>
+          <div className="panel-footer-actions">
+            <Button variant="secondary" onClick={handleExecuteAllUsers}>
+              Ejecutar todos
+            </Button>
+            <Button variant="primary" onClick={handleExecute} disabled={isExecuting}>
+              {isExecuting ? 'Ejecutando...' : 'Ejecutar'}
+            </Button>
+          </div>
         </div>
       </div>
     </Card>

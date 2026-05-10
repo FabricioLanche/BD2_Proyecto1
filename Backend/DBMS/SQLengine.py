@@ -6,7 +6,6 @@ from Backend.DBMS.storage.catalog import SystemCatalog
 from Backend.DBMS.organization.data_structures import TableConfig, Record
 from Backend.DBMS.utils.logger import ConsoleLogger
 from Backend.DBMS.utils.path_utils import resolve_dataset_path
-
 from Backend.DBMS.database_engine import DatabaseEngine
 
 

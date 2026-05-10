@@ -103,7 +103,7 @@ class DatabaseEngine:
         index_pm = self._make_buffer_manager(index_filename, io_counter, page_size=page_size)
 
         heap = HeapFile(heap_filename, config, heap_pm)
-        index = SequentialIndex(index_filename, index_pm, config.get_pk_format())
+        index = SequentialIndex(index_filename, index_pm, config.get_pk_format(), logger=self.logger)
 
         heap_pm.reset_counters()
         index_pm.reset_counters()
@@ -206,7 +206,7 @@ class DatabaseEngine:
         index_pm = self._make_buffer_manager(index_filename, io_counter, page_size=page_size)
 
         heap = HeapFile(heap_filename, config, heap_pm)
-        index = SequentialIndex(index_filename, index_pm, config.get_pk_format())
+        index = SequentialIndex(index_filename, index_pm, config.get_pk_format(), logger=self.logger)
 
         self._tables[table_name] = _TableEntry(
             heap, index, heap_pm, index_pm, io_counter, config, pk_col, spatial_meta, hash_meta or [], btree_meta or []

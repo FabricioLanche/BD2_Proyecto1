@@ -7,6 +7,9 @@ import threading
 import queue
 import os
 import json
+import time
+from typing import Optional
+import base64
 
 from Backend.DBMS.utils.logger import QueueLogger
 from Backend.DBMS.SQLengine import DBMSEngine
@@ -20,8 +23,76 @@ UPLOAD_DIR = ROOT_DIR / "Backend" / "DBMS" / "datasets"
 ENGINE = DBMSEngine()
 ENGINE_LOCK = threading.Lock()
 
+def _json_bytes_default(o):
+    if isinstance(o, (bytes, bytearray)):
+        return base64.b64encode(o).decode('ascii')
+    raise TypeError(f'Object of type {o.__class__.__name__} is not JSON serializable')
+
 class QueryRequest(BaseModel):
     query: str
+
+
+class ConcurrentUserRequest(BaseModel):
+    user_id: Optional[str] = None
+    query: str
+
+
+class ConcurrentQueryRequest(BaseModel):
+    users: list[ConcurrentUserRequest]
+
+
+class ConcurrentQueueLogger:
+    def __init__(self, q: queue.Queue):
+        self.q = q
+        self._local = threading.local()
+
+    def bind_user(self, user_id: str) -> None:
+        self._local.user_id = user_id
+
+    def clear_user(self) -> None:
+        if hasattr(self._local, 'user_id'):
+            del self._local.user_id
+
+    def _current_user_id(self) -> str:
+        return getattr(self._local, 'user_id', 'unknown')
+
+    def _push(self, payload: dict) -> None:
+        payload['user_id'] = self._current_user_id()
+        self.q.put(payload)
+
+    def log(self, level, msg: str):
+        self._push({
+            'level': getattr(level, 'value', str(level)),
+            'message': msg,
+        })
+
+    def result(self, columns: list, rows: list, description: str = ''):
+        self._push({
+            'level': 'RESULT',
+            'type': 'table',
+            'columns': columns,
+            'rows': rows,
+            'description': description,
+        })
+
+    def image(self, path: str):
+        self._push({
+            'level': 'IMAGE',
+            'type': 'image',
+            'path': path,
+        })
+
+    def info(self, msg: str):
+        self.log('INFO', msg)
+
+    def error(self, msg: str):
+        self.log('ERROR', msg)
+
+    def warning(self, msg: str):
+        self.log('WARNING', msg)
+
+    def debug(self, msg: str):
+        self.log('DEBUG', msg)
 
 @router.post("/query")
 def ejecutar_query(data: QueryRequest):
@@ -55,17 +126,87 @@ def ejecutar_query(data: QueryRequest):
                 break
             
             if item.get("type") == "table":
-                yield json.dumps(item) + "\n"
+                yield json.dumps(item, ensure_ascii=False, default=_json_bytes_default) + "\n"
             elif item.get("type") == "image":
-                yield json.dumps(item) + "\n"
+                yield json.dumps(item, ensure_ascii=False, default=_json_bytes_default) + "\n"
             else:
                 msg = item.get('message')
                 if msg is None:
-                    yield json.dumps(item) + "\n"
+                    yield json.dumps(item, ensure_ascii=False, default=_json_bytes_default) + "\n"
                 else:
                     yield f"[{item['level']}]: {msg}\n"
 
         thread.join()
+
+    return StreamingResponse(generator(), media_type="text/plain")
+
+
+@router.post("/query/concurrent")
+def ejecutar_query_concurrente(data: ConcurrentQueryRequest):
+    if not data.users:
+        raise HTTPException(status_code=400, detail="Se requiere al menos un usuario")
+
+    normalized_users = [
+        ConcurrentUserRequest(
+            user_id=user.user_id or f"user-{index + 1}",
+            query=user.query,
+        )
+        for index, user in enumerate(data.users)
+    ]
+
+    log_queue = queue.Queue()
+    logger = ConcurrentQueueLogger(log_queue)
+    total_users = len(normalized_users)
+
+    def run_user(user: ConcurrentUserRequest):
+        logger.bind_user(user.user_id or 'unknown')
+        started_at = time.perf_counter()
+        log_queue.put({
+            'type': 'start',
+            'user_id': logger._current_user_id(),
+            'query': user.query,
+        })
+
+        try:
+            ENGINE.execute_query(user.query)
+        except Exception as e:
+            logger.error(f"Error inesperado en la simulacion concurrente: {e}")
+        finally:
+            elapsed_ms = (time.perf_counter() - started_at) * 1000
+            log_queue.put({
+                'type': 'done',
+                'user_id': logger._current_user_id(),
+                'elapsed_ms': round(elapsed_ms, 3),
+            })
+            logger.clear_user()
+
+    def generator():
+        previous_logger = None
+        with ENGINE_LOCK:
+            previous_logger = ENGINE.logger
+            ENGINE.set_logger(logger)
+
+        try:
+            threads = [
+                threading.Thread(target=run_user, args=(user,), daemon=True)
+                for user in normalized_users
+            ]
+
+            for thread in threads:
+                thread.start()
+
+            finished_users = 0
+            while finished_users < total_users:
+                item = log_queue.get()
+                yield json.dumps(item, ensure_ascii=False, default=_json_bytes_default) + "\n"
+                if item.get('type') == 'done':
+                    finished_users += 1
+
+            for thread in threads:
+                thread.join()
+        finally:
+            with ENGINE_LOCK:
+                ENGINE.set_logger(previous_logger)
 
     return StreamingResponse(generator(), media_type="text/plain")
 

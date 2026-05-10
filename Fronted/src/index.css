@@ -403,6 +403,14 @@ body {
   gap: 16px;
 }
 
+.panel-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .panel-hint {
   margin: 0;
   font-size: 12px;
